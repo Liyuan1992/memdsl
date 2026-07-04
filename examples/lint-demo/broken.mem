@@ -1,0 +1,70 @@
+# Deliberately broken memory source, used to demonstrate `memdsl lint`.
+# Every declaration below violates at least one rule.
+
+module lint_demo
+
+# error[unresolved_symbol]: subject references an entity nobody declared
+preference coffee.black_only {
+  subject: User.Barista
+  claim: "Only drinks black coffee."
+  force: advisory
+  scope: personal_routine
+  status: active
+  evidence {
+    source: chat
+    quote: "Black. No sugar. Ever."
+  }
+}
+
+# error[missing_evidence]: active fact with no evidence block
+fact home.timezone {
+  subject: User
+  claim: "Lives in UTC+8."
+  scope: global
+  status: active
+}
+
+# warning[type_force_mismatch]: a preference pretending to be a law
+preference music.no_interruptions {
+  subject: User
+  claim: "Never interrupt when music is playing."
+  force: hard
+  scope: personal_routine
+  status: active
+  evidence {
+    source: chat
+    quote: "Headphones on means do not disturb."
+  }
+}
+
+# warning[boundary_without_exception] + warning[stale_state] below
+boundary spending.no_subscriptions {
+  subject: User
+  rule: "Do not suggest new paid subscriptions."
+  force: hard
+  scope: global
+  status: active
+  evidence {
+    source: chat
+    quote: "No more subscriptions, we have enough."
+  }
+}
+
+state job.search_status {
+  subject: User
+  claim: "Actively interviewing at three companies."
+  as_of: 2025-11-02
+  scope: global
+  status: active
+  evidence {
+    source: chat
+    quote: "Three interview loops running in parallel right now."
+  }
+}
+
+entity User {
+  kind: Person
+  canonical_name: "Demo"
+  aliases: ["me"]
+  status: active
+}

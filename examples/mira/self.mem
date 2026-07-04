@@ -1,0 +1,78 @@
+# Synthetic persona: "Mira", a PhD researcher.
+# All content is fictional and written to exercise the DSL.
+
+module self
+
+entity User {
+  kind: Person
+  canonical_name: "Mira"
+  aliases: ["me", "Mira"]
+  status: active
+}
+
+entity User.Thesis {
+  kind: ResearchProject
+  canonical_name: "Thesis"
+  aliases: ["thesis", "the dissertation", "my phd"]
+  status: active
+}
+
+entity Person.Advisor {
+  kind: Person
+  canonical_name: "Advisor"
+  aliases: ["my advisor", "prof"]
+  status: active
+}
+
+boundary comms.no_results_before_publication {
+  subject: User
+  rule: "Never share unpublished experimental results outside the lab group."
+  force: hard
+  scope: global
+  exceptions: [advisor_approved]
+  status: active
+  evidence {
+    source: chat
+    quote: "Nothing from the experiments leaves the lab before the paper is out."
+  }
+}
+
+preference feedback.direct_over_polite {
+  subject: User
+  claim: "Prefers blunt, specific feedback on drafts over encouragement."
+  force: strong
+  scope: global
+  confidence: high
+  status: active
+  evidence {
+    source: chat
+    quote: "Don't tell me it's promising. Tell me which section is weakest."
+  }
+}
+
+relationship advisor.working_style {
+  subject: User
+  parties: [User, Person.Advisor]
+  claim: "Advisor responds best to short written updates before meetings."
+  stance: cooperative
+  privacy: private
+  scope: relationship("Person.Advisor")
+  status: active
+  evidence {
+    source: chat
+    quote: "If I send her half a page the night before, the meeting actually goes somewhere."
+  }
+}
+
+state thesis.chapter_progress {
+  subject: User.Thesis
+  claim: "Chapters 1-2 drafted; chapter 3 experiments running."
+  as_of: 2026-06-28
+  scope: project("Thesis")
+  confidence: high
+  status: active
+  evidence {
+    source: chat
+    quote: "Two chapters down, third one is blocked on the ablation runs."
+  }
+}

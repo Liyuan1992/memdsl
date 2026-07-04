@@ -1,0 +1,91 @@
+# Synthetic persona: "Alex" -- project memory for a fictional app "Aurora".
+
+module projects.aurora
+
+use User
+
+entity Project.Aurora {
+  kind: Project
+  canonical_name: "Aurora"
+  aliases: ["aurora", "the app", "my side project"]
+  status: active
+}
+
+decision aurora.db_sqlite_first {
+  subject: Project.Aurora
+  decision: "Start with SQLite for local-first storage."
+  reason: "Zero-ops, single user, easy backups."
+  alternatives: [postgres, dynamodb]
+  result: "Worked well up to ~50k rows."
+  scope: project("Aurora")
+  status: superseded
+  evidence {
+    source: chat
+    quote: "Let's just use SQLite until it hurts."
+  }
+}
+
+decision aurora.db_postgres_migration {
+  subject: Project.Aurora
+  decision: "Migrate Aurora to Postgres for multi-device sync."
+  reason: "Sync conflicts and concurrent writes outgrew SQLite."
+  alternatives: [litestream, turso]
+  result: pending
+  scope: project("Aurora")
+  status: active
+  supersedes: aurora.db_sqlite_first
+  evidence {
+    source: chat
+    quote: "SQLite is finally hurting. Time for Postgres."
+  }
+}
+
+decision aurora.pricing_free_tier {
+  subject: Project.Aurora
+  decision: "Keep a permanent free tier."
+  reason: "Growth depends on word of mouth from free users."
+  result: pending
+  scope: project("Aurora")
+  status: active
+  relations {
+    conflicts_with: aurora.revenue_target_2026
+  }
+  evidence {
+    source: chat
+    quote: "Free tier stays, that's how people find us."
+  }
+}
+
+goal aurora.revenue_target_2026 {
+  subject: Project.Aurora
+  claim: "Reach $2k MRR from Aurora by end of 2026."
+  horizon: "2026-12-31"
+  success_signal: "MRR dashboard >= 2000 for one full month."
+  scope: project("Aurora")
+  status: active
+  evidence {
+    source: chat
+    quote: "If Aurora can't hit 2k a month by December I'll fold it back to a hobby."
+  }
+}
+
+state aurora.beta_progress {
+  subject: Project.Aurora
+  claim: "Private beta with 40 testers; sync is the top complaint."
+  as_of: 2026-06-20
+  scope: project("Aurora")
+  confidence: high
+  status: active
+  evidence {
+    source: chat
+    quote: "40 people in the beta now and every second email is about sync."
+  }
+}
+
+open_issue aurora.pricing_undecided {
+  subject: Project.Aurora
+  claim: "Paid tier pricing is undecided: $5 flat vs usage-based."
+  next_action: "Interview five beta users about willingness to pay."
+  scope: project("Aurora")
+  status: active
+}

@@ -1,0 +1,84 @@
+# Synthetic persona: "Alex", an indie developer.
+# All content is fictional and written to exercise the DSL.
+
+module self
+
+entity User {
+  kind: Person
+  canonical_name: "Alex"
+  aliases: ["me", "Alex"]
+  status: active
+}
+
+entity User.DayJob {
+  kind: Employment
+  canonical_name: "DayJob"
+  aliases: ["work", "day job", "the office"]
+  status: active
+}
+
+preference schedule.deep_work_mornings {
+  subject: User
+  about: User.DayJob
+  claim: "Prefers deep work in the morning; meetings after 2pm."
+  force: strong
+  scope: scheduling
+  confidence: high
+  status: active
+  evidence {
+    source: chat
+    quote: "Stop booking me into morning meetings. Mornings are for real work."
+  }
+}
+
+preference writing.no_hype {
+  subject: User
+  claim: "Prefers plain, concrete language over hype in written output."
+  force: advisory
+  scope: global
+  confidence: medium
+  status: active
+  evidence {
+    source: chat
+    quote: "Please cut the 'revolutionary' and 'game-changing' stuff."
+  }
+}
+
+boundary privacy.no_family_in_public {
+  subject: User
+  rule: "Never include family member names or details in public-facing content."
+  force: hard
+  scope: global
+  exceptions: [user_explicit_override]
+  status: active
+  evidence {
+    source: chat
+    quote: "Anything about my family stays out of blog posts and social media. Always."
+  }
+}
+
+# NOTE: this boundary intentionally omits `exceptions` -- `memdsl lint`
+# flags it so the owner confirms it is truly unconditional.
+boundary schedule.no_meetings_before_10 {
+  subject: User
+  rule: "Do not schedule or suggest meetings before 10:00."
+  force: hard
+  scope: scheduling
+  status: active
+  evidence {
+    source: chat
+    quote: "No meetings before ten. I mean it."
+  }
+}
+
+principle engineering.fix_root_cause {
+  subject: User
+  claim: "Prefers fixing root causes over patching symptoms, even when slower."
+  force: strong
+  scope: global
+  status: active
+  evidence {
+    source: chat
+    quote: "I'd rather lose a day finding the real bug than ship another workaround."
+  }
+}
