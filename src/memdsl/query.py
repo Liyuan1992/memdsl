@@ -94,12 +94,21 @@ class EvidencePack:
                 lines.append(f"- {m}")
         return "\n".join(lines)
 
-    def render_json(self) -> str:
+    def as_dict(self) -> dict:
+        """Plain-dict form of the pack: the stable contract for JSON and MCP.
+
+        Declarations keep their type label and evidence so downstream
+        consumers can tell a verified, evidence-backed item from a scored
+        candidate instead of flattening both into one relevance list.
+        """
         def decl(d: Declaration) -> dict:
-            return {"id": d.id, "claim": d.claim_text, "force": d.force,
-                    "scope": d.scope, "status": d.status,
-                    "file": d.file, "line": d.line}
-        return json.dumps({
+            out = {"id": d.id, "kind": d.kind, "claim": d.claim_text,
+                   "force": d.force, "scope": d.scope, "subject": d.subject,
+                   "status": d.status, "file": d.file, "line": d.line}
+            if d.evidence:
+                out["evidence"] = d.evidence
+            return out
+        return {
             "query": self.query,
             "resolved_subjects": self.resolved_subjects,
             "must": [decl(d) for d in self.must],
@@ -109,7 +118,10 @@ class EvidencePack:
             "conflicts": [{"id": d.id, "conflicts_with": t}
                           for d, t in self.conflicts],
             "missing": self.missing,
-        }, indent=2, ensure_ascii=False)
+        }
+
+    def render_json(self) -> str:
+        return json.dumps(self.as_dict(), indent=2, ensure_ascii=False)
 
 
 def _score(decl: Declaration, query_terms: List[str],

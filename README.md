@@ -127,6 +127,35 @@ Alex's `schedule.no_meetings_before_10` boundary declares no `exceptions`,
 and the linter asks you to confirm it is truly unconditional. That nudge
 is the feature; a clean run is `examples/mira/`.
 
+### Use as an MCP server
+
+memdsl ships an optional [MCP](https://modelcontextprotocol.io) server, so
+any MCP client (Claude Code, Claude Desktop, ...) can mount a `.mem`
+workspace as governed memory:
+
+```console
+pip install "memdsl[mcp]"
+memdsl-mcp --workspace examples/alex --inspect   # status + lint, no transport
+memdsl-mcp --workspace ~/memory                  # stdio MCP server
+```
+
+Register with Claude Code:
+
+```console
+claude mcp add memdsl -- memdsl-mcp --workspace ~/memory
+```
+
+Tools: `memory_query` (layered evidence pack), `memory_explain` (one
+declaration with evidence and relations), `memory_list`, `memory_lint`.
+Resources expose the raw `.mem` source (`memdsl://status`, `memdsl://files`,
+`memdsl://file/{file_id}`). Access can be narrowed with `--scopes` or
+`MEMDSL_MCP_SCOPES` (default `read:summary,read:search`).
+
+The server preserves the layered contract in every tool result — MUST items
+stay typed rules with their evidence attached, never flattened into a
+relevance-ranked list — and it is strictly read-only: nothing writes memory
+until the gated write pipeline lands (see roadmap).
+
 ### What's in the box
 
 - **A tiny declarative language** (`.mem`): typed declarations
@@ -139,6 +168,9 @@ is the feature; a clean run is `examples/mira/`.
   preferences masquerading as laws, unmarked supersede chains.
 - **A query executor** implementing the EvidencePack contract, plus
   `explain` for tracing one declaration's relations and provenance.
+- **An MCP server** (optional extra: `pip install "memdsl[mcp]"`) exposing
+  the same contract as `memory_query` / `memory_explain` / `memory_list` /
+  `memory_lint` tools plus raw-source resources over stdio.
 - **Synthetic example personas** (`examples/`) — fictional users "Alex"
   and "Mira" — and a deliberately broken file for the linter demo.
 
@@ -315,11 +347,32 @@ memdsl explain examples/alex/ decision:aurora.db_postgres_migration
 
 注意：`memdsl lint examples/alex/` 会报告 **一个有意保留的 warning**：Alex 的 `schedule.no_meetings_before_10` boundary 没有声明 `exceptions`，linter 会要求你确认它是否真的是无条件规则。这个提醒就是功能本身；如果想看完全干净的运行结果，可以使用 `examples/mira/`。
 
+### 作为 MCP server 使用
+
+memdsl 提供一个可选的 [MCP](https://modelcontextprotocol.io) server，任何 MCP 客户端（Claude Code、Claude Desktop 等）都可以把一个 `.mem` workspace 挂载为受治理的记忆层：
+
+```console
+pip install "memdsl[mcp]"
+memdsl-mcp --workspace examples/alex --inspect   # 打印 status + lint，不启动传输
+memdsl-mcp --workspace ~/memory                  # stdio MCP server
+```
+
+在 Claude Code 中注册：
+
+```console
+claude mcp add memdsl -- memdsl-mcp --workspace ~/memory
+```
+
+工具：`memory_query`（分层 evidence pack）、`memory_explain`（单条声明及其证据与关系）、`memory_list`、`memory_lint`。资源以原始 `.mem` 源码形式暴露（`memdsl://status`、`memdsl://files`、`memdsl://file/{file_id}`）。可以通过 `--scopes` 或 `MEMDSL_MCP_SCOPES` 收窄权限（默认 `read:summary,read:search`）。
+
+server 在每个工具返回值中都保留分层契约——MUST 项始终是携带证据的有类型规则，绝不会被拍扁成一个按相关性排序的列表——并且严格只读：在门控写入流水线落地之前（见 roadmap），任何操作都不会写入记忆。
+
 ### 包里有什么
 
 - **一种小型声明式语言**（`.mem`）：有类型声明（`entity`、`fact`、`preference`、`boundary`、`principle`、`decision`、`state`、`open_issue`），支持 force、scope、evidence、relations（`supersedes`、`conflicts_with`、`refines` 等）以及 lifecycle status。完整语法和语义见 [docs/SPEC.md](docs/SPEC.md)。
 - **一个 linter**，包含十类诊断：悬空符号、缺失证据、别名歧义、过期状态、无例外的边界、伪装成法律的偏好、未标记的 supersede 链等。
 - **一个查询执行器**，实现 EvidencePack 契约，并提供 `explain` 来追踪单条声明的关系和来源。
+- **一个 MCP server**（可选 extra：`pip install "memdsl[mcp]"`），以 `memory_query` / `memory_explain` / `memory_list` / `memory_lint` 工具和原始源码资源的形式，通过 stdio 暴露同一套契约。
 - **合成示例人格**（`examples/`）：虚构用户 “Alex” 和 “Mira”，以及一个用于 linter 演示的故意损坏文件。
 
 ### memdsl 不是什么

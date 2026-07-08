@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memdsl"
-version = "0.1.0"
+version = "0.2.0"
 description = "Agent memory as normative source code: a lintable, queryable memory DSL for LLM agents"
 readme = "README.md"
 license = { text = "MIT" }
@@ -21,9 +21,11 @@ classifiers = [
 
 [project.scripts]
 memdsl = "memdsl.cli:main"
+memdsl-mcp = "memdsl.mcp_server:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+mcp = ["mcp>=1.2"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/memdsl"]
