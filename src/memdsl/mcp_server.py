@@ -31,8 +31,10 @@ SERVER_INSTRUCTIONS = (
     "rules to enforce, SHOULD items are strong preferences, CONTEXT items "
     "are scored candidate facts, CONFLICT items must be surfaced to the "
     "user, and MISSING items are known gaps. Call memory_explain on a "
-    "declaration id before citing it as evidence. This server is "
-    "read-only: it never writes or approves memory."
+    "declaration id before citing it as evidence. Writes are propose-only: "
+    "memory_propose stages a declaration for human review and nothing "
+    "becomes memory until a person approves it with the memdsl review CLI. "
+    "Never present a pending proposal as accepted memory."
 )
 
 
@@ -101,6 +103,16 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         """Lint the memory workspace and report diagnostics."""
         return svc.lint_workspace()
 
+    @mcp.tool(name="memory_propose")
+    def memory_propose(source: str, reason: str = "") -> dict:
+        """Propose one .mem declaration for human review. Fail-closed: it must parse and pass lint (evidence quote required); it is NOT memory until approved."""
+        return svc.propose(source, reason=reason)
+
+    @mcp.tool(name="memory_review_list")
+    def memory_review_list(status: str = "pending", limit: int = 50) -> dict:
+        """List review-queue proposals (pending/approved/rejected/all). Approval itself is human-only via the memdsl review CLI."""
+        return svc.list_proposals(status=status, limit=limit)
+
     @mcp.prompt(name="memdsl_task_brief")
     def memdsl_task_brief(task: str = "") -> str:
         """Brief an agent on how to use memdsl memory for a task."""
@@ -113,6 +125,36 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
             "rather than guessing. Call memory_explain before citing any "
             "declaration.\n\n"
             f"Task: {task}"
+        )
+
+    @mcp.prompt(name="memdsl_write_declaration")
+    def memdsl_write_declaration(fact: str = "") -> str:
+        """Template for turning an observation into a lint-clean .mem proposal."""
+        return (
+            "Turn the observation below into ONE .mem declaration and submit "
+            "it with memory_propose. Rules:\n"
+            "- Pick the right kind: boundary (rule the agent must obey), "
+            "preference (shapes suggestions), fact, decision, state (use "
+            "as_of), or open_issue (unresolved question).\n"
+            "- Include a verbatim evidence quote from the source "
+            "conversation; never invent or paraphrase quotes.\n"
+            "- Use an existing entity as subject (check memory_list "
+            "kind=entity) or declare the entity first in a separate proposal.\n"
+            "- If it replaces an existing declaration, add "
+            "supersedes: <old_id> instead of contradicting it.\n"
+            "Syntax example:\n\n"
+            "preference feedback.direct {\n"
+            "  subject: User\n"
+            "  claim: \"Prefers direct feedback on drafts.\"\n"
+            "  force: strong\n"
+            "  scope: global\n"
+            "  status: active\n"
+            "  evidence {\n"
+            "    source: chat\n"
+            "    quote: \"Just tell me what is wrong with it.\"\n"
+            "  }\n"
+            "}\n\n"
+            f"Observation: {fact}"
         )
 
     return mcp
@@ -137,7 +179,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         help=".mem file or directory (repeatable; default: MEMDSL_WORKSPACE)")
     parser.add_argument(
         "--scopes", default="",
-        help="comma-separated scopes (default: read:summary,read:search)")
+        help="comma-separated scopes (default: read:summary,read:search,write:candidate)")
+    parser.add_argument(
+        "--staging", default="",
+        help="review-queue staging dir (default: <workspace>/.memdsl)")
     parser.add_argument(
         "--inspect", action="store_true",
         help="print status and lint results without starting the MCP transport")
@@ -153,7 +198,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     try:
-        service = MemdslMCPService(workspaces, scopes=args.scopes or None)
+        service = MemdslMCPService(
+            workspaces, scopes=args.scopes or None, staging=args.staging or None)
     except (ValueError, FileNotFoundError) as exc:
         print(str(exc), file=sys.stderr)
         return 2

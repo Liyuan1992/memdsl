@@ -12,8 +12,10 @@ Every payload carries:
 
 Access is gated by scopes (comma-separated in MEMDSL_MCP_SCOPES or passed
 explicitly): "read:summary" for status/list/lint/source, "read:search"
-for query/explain. The server is read-only in v0.2; write scopes will
-arrive with the gated write pipeline.
+for query/explain, "write:candidate" for memory_propose. Writes are
+propose-only and fail-closed: a proposal lands in the review queue
+(`memdsl.review.ReviewStore`) and nothing becomes memory until a human
+approves it with `memdsl review approve`.
 """
 
 from __future__ import annotations
@@ -26,10 +28,12 @@ from memdsl.linter import lint
 from memdsl.model import Workspace, Declaration
 from memdsl.parser import ParseError
 from memdsl.query import build_evidence_pack, explain as explain_text
+from memdsl.review import ReviewStore, staging_dir_for
 
 SUMMARY_SCOPE = "read:summary"
 SEARCH_SCOPE = "read:search"
-DEFAULT_SCOPES = frozenset({SUMMARY_SCOPE, SEARCH_SCOPE})
+WRITE_CANDIDATE_SCOPE = "write:candidate"
+DEFAULT_SCOPES = frozenset({SUMMARY_SCOPE, SEARCH_SCOPE, WRITE_CANDIDATE_SCOPE})
 
 QUERY_BOUNDARY = (
     "MUST items are hard rules to enforce, not context to weigh. CONTEXT "
@@ -47,6 +51,15 @@ TOOL_NAMES = (
     "memory_explain",
     "memory_list",
     "memory_lint",
+    "memory_propose",
+    "memory_review_list",
+)
+
+PROPOSE_BOUNDARY = (
+    "A proposal is not memory. It sits in the review queue and is never "
+    "served by memory_query until a human approves it with "
+    "`memdsl review approve`. Do not treat a pending proposal as an "
+    "accepted fact or rule."
 )
 
 
@@ -74,6 +87,8 @@ class MemdslMCPService:
         workspace_paths: Sequence[str],
         *,
         scopes: Union[str, Sequence[str], None] = None,
+        staging: Optional[str] = None,
+        client_name: str = "",
     ) -> None:
         paths = [os.path.abspath(str(p)) for p in workspace_paths if str(p).strip()]
         if not paths:
@@ -83,8 +98,17 @@ class MemdslMCPService:
             raise FileNotFoundError(f"workspace path(s) not found: {', '.join(missing)}")
         self.workspace_paths = paths
         self.scopes = parse_scopes(scopes)
+        self.client_name = client_name or os.getenv("MEMDSL_MCP_CLIENT", "mcp-client")
+        self._staging = staging
+        self._review: Optional[ReviewStore] = None
         self._ws: Optional[Workspace] = None
         self._ws_signature: Optional[tuple] = None
+
+    @property
+    def review_store(self) -> ReviewStore:
+        if self._review is None:
+            self._review = ReviewStore(staging_dir_for(self.workspace_paths, self._staging))
+        return self._review
 
     # ---- workspace loading ----
 
@@ -157,7 +181,11 @@ class MemdslMCPService:
             "scopes": sorted(self.scopes),
             "resources": list(RESOURCE_URIS),
             "tools": list(TOOL_NAMES),
-            "boundary": "This server is read-only; it never writes or approves memory.",
+            "pending_proposals": len(self.review_store.list(status="pending")),
+            "boundary": (
+                "Writes are propose-only: memory_propose stages a proposal for "
+                "human review; this server never approves or serves unapproved memory."
+            ),
         }
 
     def query(
@@ -341,6 +369,72 @@ class MemdslMCPService:
                 for d in diags
             ],
             "boundary": "Diagnostics describe the memory source; fixing it is a human edit, not an MCP write.",
+        }
+
+    # ---- gated writes (propose-only) ----
+
+    def propose(self, source: str, *, reason: str = "") -> dict:
+        self.require_scope(WRITE_CANDIDATE_SCOPE)
+        schema = "memdsl.mcp.propose.v1"
+        try:
+            ws = self.workspace()
+        except ParseError as exc:
+            return self._parse_error(schema, exc)
+        result = self.review_store.create(
+            ws, source, reason=reason, client=self.client_name)
+        if not result["ok"]:
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": "invalid",
+                "errors": result.get("errors", []),
+                "warnings": result.get("warnings", []),
+                "boundary": PROPOSE_BOUNDARY,
+                "next_actions": [
+                    "Fix the declaration source: it must parse to exactly one declaration "
+                    "and pass lint against the live workspace (evidence with a verbatim "
+                    "quote is required for fact/preference/boundary/principle/decision/state).",
+                ],
+            }
+        return {
+            "ok": True,
+            "schema_version": schema,
+            "status": "pending_review",
+            "proposal_id": result["proposal_id"],
+            "declaration_id": result["declaration_id"],
+            "path": result["path"],
+            "warnings": result.get("warnings", []),
+            "boundary": PROPOSE_BOUNDARY,
+            "next_actions": [
+                "Tell the user a proposal is pending and how to review it: "
+                "`memdsl review list <workspace>` then "
+                f"`memdsl review approve <workspace> {result['proposal_id']} --into <file.mem>`.",
+            ],
+        }
+
+    def list_proposals(self, *, status: str = "pending", limit: int = 50) -> dict:
+        self.require_scope(SUMMARY_SCOPE)
+        schema = "memdsl.mcp.review_list.v1"
+        if status not in ("pending", "approved", "rejected", "all"):
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": "invalid",
+                "error": "status must be pending, approved, rejected, or all",
+            }
+        limit = _clamp_int(limit, 1, 200, 50)
+        proposals = [p.summary() for p in self.review_store.list(status=status)]
+        return {
+            "ok": True,
+            "schema_version": schema,
+            "status": "ok",
+            "filter": status,
+            "total": len(proposals),
+            "proposals": proposals[:limit],
+            "boundary": PROPOSE_BOUNDARY,
+            "next_actions": [
+                "Approval and rejection are human-only, via the memdsl review CLI.",
+            ],
         }
 
     # ---- source resources ----

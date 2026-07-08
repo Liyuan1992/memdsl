@@ -38,6 +38,19 @@ tools (expect memory_query/memory_explain/memory_list/memory_lint), call
 `memory_query` and check MUST ids surface global boundaries, read
 `memdsl://status` and `memdsl://file/{0}` resources.
 
+## Write path (gated)
+
+Drive the full loop in a temp workspace (never `examples/` — staging
+lands in `<workspace>/.memdsl/`):
+
+1. Over stdio, `memory_propose` with a declaration lacking evidence →
+   expect `invalid` + `missing_evidence`; with a good one → `pending_review`.
+2. `memory_query` must NOT serve the pending declaration.
+3. `memdsl review list/show/approve <ws> <id>` → approve appends to
+   `approved.mem` (or `--into`), double-approve exits 1.
+4. Re-query: the approved id now appears. Check `.memdsl/audit.log`
+   actions are `["propose", "approve"]`.
+
 ## Gotchas
 
 - Scope probe: `--scopes read:summary` must make `memory_query` /

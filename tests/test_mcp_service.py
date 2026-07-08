@@ -74,7 +74,7 @@ def service(workspace_dir):
 
 
 def test_parse_scopes_default_and_explicit():
-    assert parse_scopes(None) == {"read:summary", "read:search"}
+    assert parse_scopes(None) == {"read:summary", "read:search", "write:candidate"}
     assert parse_scopes("read:summary, ,read:search") == {"read:summary", "read:search"}
     assert parse_scopes(["all"]) == {"all"}
 
@@ -119,6 +119,46 @@ def test_query_scope_enforced(workspace_dir):
         svc.query("meetings")
     # summary surfaces still work
     assert svc.status()["ok"] is True
+
+
+def test_propose_creates_pending_proposal(service):
+    source = (
+        "decision tooling.editor {\n"
+        "  subject: User\n"
+        "  decision: \"Use one standard editor for reviews.\"\n"
+        "  status: active\n"
+        "  evidence {\n"
+        "    source: chat\n"
+        "    quote: \"Let's standardize on one editor.\"\n"
+        "  }\n"
+        "}\n"
+    )
+    payload = service.propose(source, reason="test proposal")
+    assert payload["ok"] is True
+    assert payload["status"] == "pending_review"
+    assert payload["declaration_id"] == "decision:tooling.editor"
+    assert payload["boundary"]
+
+    queue = service.list_proposals()
+    assert queue["total"] == 1
+    assert queue["proposals"][0]["id"] == payload["proposal_id"]
+
+    # a pending proposal is never served as memory
+    assert service.status()["declarations"] == 4
+    assert service.status()["pending_proposals"] == 1
+
+
+def test_propose_fail_closed_and_scope(workspace_dir):
+    svc = MemdslMCPService([str(workspace_dir)])
+    bad = svc.propose("fact user.language {\n  subject: User\n  claim: \"Python.\"\n  status: active\n}\n")
+    assert bad["ok"] is False
+    assert bad["status"] == "invalid"
+    assert any(e["code"] == "missing_evidence" for e in bad["errors"])
+    assert svc.list_proposals()["total"] == 0
+
+    readonly = MemdslMCPService([str(workspace_dir)], scopes="read:summary,read:search")
+    with pytest.raises(MCPScopeError):
+        readonly.propose("anything")
 
 
 def test_explain_found_and_not_found(service):

@@ -12,7 +12,7 @@ from memdsl.model import Workspace, Declaration
 from memdsl.linter import lint
 from memdsl.query import build_evidence_pack, EvidencePack
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "parse_file",

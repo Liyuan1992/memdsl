@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memdsl"
-version = "0.2.0"
+version = "0.3.0"
 description = "Agent memory as normative source code: a lintable, queryable memory DSL for LLM agents"
 readme = "README.md"
 license = { text = "MIT" }

@@ -61,6 +61,30 @@ def test_resources_registered(server):
     assert "memdsl://files" in uris
 
 
+def test_call_memory_propose_stages_only(server, workspace_dir):
+    source = (
+        "preference feedback.direct {\n"
+        "  subject: User\n"
+        "  claim: \"Prefers direct feedback.\"\n"
+        "  force: strong\n"
+        "  status: active\n"
+        "  evidence {\n"
+        "    source: chat\n"
+        "    quote: \"Just tell me what is wrong.\"\n"
+        "  }\n"
+        "}\n"
+    )
+    result = asyncio.run(server.call_tool("memory_propose", {"source": source}))
+    text = json.dumps(_as_jsonable(result), ensure_ascii=False, default=str)
+    assert "pending_review" in text
+    # staged under .memdsl, not served as workspace memory
+    assert (workspace_dir / ".memdsl" / "proposals").is_dir()
+    status = asyncio.run(server.read_resource("memdsl://status"))
+    payload = json.loads(list(status)[0].content)
+    assert payload["declarations"] == 2
+    assert payload["pending_proposals"] == 1
+
+
 def test_call_memory_query(server):
     result = asyncio.run(
         server.call_tool("memory_query", {"query": "meetings tomorrow morning"})
