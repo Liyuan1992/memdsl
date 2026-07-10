@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "codex/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: python -m pip install -e .[dev]
+      - name: Compile
+        run: python -m compileall -q src tests
+      - name: Test
+        run: python -m pytest tests -q
+      - name: Build and inspect wheel
+        run: |
+          python -m build
+          python -m pip install --force-reinstall dist/*.whl
+          python -c "import memdsl; assert memdsl.__version__ == '0.5.0'; assert memdsl.EVIDENCE_PACK_SCHEMA == 'memdsl.evidence_pack.v1'"

@@ -16,6 +16,8 @@ from typing import Dict, List, Optional, Tuple
 
 from memdsl.model import Workspace, Declaration
 
+EVIDENCE_PACK_SCHEMA = "memdsl.evidence_pack.v1"
+
 _WORD_RE = re.compile(r"[a-z0-9_]+")
 
 _STOPWORDS = {
@@ -114,11 +116,16 @@ class EvidencePack:
                 out["evidence"] = d.evidence
             return out
         return {
+            "schema_version": EVIDENCE_PACK_SCHEMA,
             "query": self.query,
             "resolved_subjects": self.resolved_subjects,
             "must": [decl(d) for d in self.must],
             "should": [decl(d) for d in self.should],
-            "context": [dict(decl(s.declaration), score=round(s.score, 3))
+            "context": [dict(
+                            decl(s.declaration),
+                            score=round(s.score, 3),
+                            matched_terms=list(s.matched_terms),
+                        )
                         for s in self.context],
             "conflicts": [{"id": d.id, "conflicts_with": t}
                           for d, t in self.conflicts],
