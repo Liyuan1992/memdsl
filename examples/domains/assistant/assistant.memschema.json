@@ -1,0 +1,32 @@
+{
+  "name": "assistant",
+  "version": "1",
+  "types": {
+    "routine": {
+      "runtime_role": "guidance",
+      "required_fields": ["claim", "evidence", "scope"],
+      "optional_fields": ["cadence", "time_window"],
+      "search_fields": ["cadence", "time_window"],
+      "capabilities": ["requires_evidence", "searchable"],
+      "allow_extra_fields": false
+    },
+    "commitment": {
+      "runtime_role": "constraint",
+      "required_fields": ["claim", "evidence", "scope"],
+      "optional_fields": ["counterparty", "due"],
+      "search_fields": ["counterparty", "due"],
+      "capabilities": ["requires_evidence", "searchable", "enforceable", "guardable"],
+      "defaults": {"force": "hard", "status": "active"},
+      "allowed_forces": ["hard"],
+      "allow_extra_fields": false
+    },
+    "relationship_context": {
+      "runtime_role": "assertion",
+      "required_fields": ["claim", "evidence", "scope"],
+      "optional_fields": ["parties", "context"],
+      "search_fields": ["parties", "context"],
+      "capabilities": ["requires_evidence", "searchable"],
+      "allow_extra_fields": false
+    }
+  }
+}

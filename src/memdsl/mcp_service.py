@@ -30,6 +30,7 @@ from memdsl.model import Workspace, Declaration
 from memdsl.parser import ParseError
 from memdsl.query import build_evidence_pack, explain as explain_text
 from memdsl.review import ReviewStore, staging_dir_for
+from memdsl.schema import SchemaError
 
 SUMMARY_SCOPE = "read:summary"
 SEARCH_SCOPE = "read:search"
@@ -44,12 +45,14 @@ QUERY_BOUNDARY = (
 
 RESOURCE_URIS = (
     "memdsl://status",
+    "memdsl://types",
     "memdsl://files",
 )
 
 TOOL_NAMES = (
     "memory_query",
     "memory_check",
+    "memory_types",
     "memory_explain",
     "memory_list",
     "memory_lint",
@@ -129,7 +132,15 @@ class MemdslMCPService:
     def workspace(self) -> Workspace:
         """Load the workspace, reloading when any `.mem` file changes."""
         signature = []
-        for f in self.mem_files():
+        tracked_files = list(self.mem_files())
+        if self._ws is not None:
+            tracked_files.extend(self._ws.registry.schema_files)
+            for path in self.workspace_paths:
+                root = path if os.path.isdir(path) else os.path.dirname(path)
+                manifest = os.path.join(root, "memdsl.json")
+                if os.path.isfile(manifest):
+                    tracked_files.append(manifest)
+        for f in sorted(set(tracked_files)):
             try:
                 signature.append((f, os.path.getmtime(f), os.path.getsize(f)))
             except OSError:
@@ -147,14 +158,20 @@ class MemdslMCPService:
                 f"Configured scopes: {', '.join(sorted(self.scopes)) or '(none)'}"
             )
 
-    def _parse_error(self, schema_version: str, exc: ParseError) -> dict:
+    def _workspace_error(
+        self,
+        schema_version: str,
+        exc: Union[ParseError, SchemaError],
+    ) -> dict:
+        status = "schema_error" if isinstance(exc, SchemaError) else "parse_error"
         return {
             "ok": False,
             "schema_version": schema_version,
-            "status": "parse_error",
+            "status": status,
             "error": str(exc),
             "next_actions": [
-                "Run memory_lint or `memdsl lint` on the workspace and fix the reported file.",
+                "Run `memdsl lint` on the workspace and fix the reported source, "
+                "manifest, or schema file.",
             ],
         }
 
@@ -165,8 +182,8 @@ class MemdslMCPService:
         schema = "memdsl.mcp.status.v1"
         try:
             ws = self.workspace()
-        except ParseError as exc:
-            return self._parse_error(schema, exc)
+        except (ParseError, SchemaError) as exc:
+            return self._workspace_error(schema, exc)
         kinds: dict = {}
         for d in ws.declarations:
             kinds[d.kind] = kinds.get(d.kind, 0) + 1
@@ -180,6 +197,9 @@ class MemdslMCPService:
             "declarations": len(ws.declarations),
             "active_declarations": len(ws.active()),
             "kinds": dict(sorted(kinds.items())),
+            "types": dict(sorted(kinds.items())),
+            "registered_types": self._ws.registry.names(),
+            "schema_files": list(self._ws.registry.schema_files),
             "scopes": sorted(self.scopes),
             "resources": list(RESOURCE_URIS),
             "tools": list(TOOL_NAMES),
@@ -195,6 +215,7 @@ class MemdslMCPService:
         query: str,
         *,
         kinds: Optional[Sequence[str]] = None,
+        types: Optional[Sequence[str]] = None,
         subject: Optional[str] = None,
         limit: int = 8,
     ) -> dict:
@@ -211,12 +232,13 @@ class MemdslMCPService:
             }
         try:
             ws = self.workspace()
-        except ParseError as exc:
-            return self._parse_error(schema, exc)
+        except (ParseError, SchemaError) as exc:
+            return self._workspace_error(schema, exc)
         limit = _clamp_int(limit, 1, 50, 8)
         pack = build_evidence_pack(
             ws, query_text,
             kinds=list(kinds) if kinds else None,
+            types=list(types) if types else None,
             subject=subject or None,
             limit=limit,
         )
@@ -249,12 +271,12 @@ class MemdslMCPService:
                 "schema_version": schema,
                 "status": "invalid",
                 "error": "id_required",
-                "next_actions": ["Pass a declaration id (kind:name or name)."],
+                "next_actions": ["Pass a declaration id (type:name or name)."],
             }
         try:
             ws = self.workspace()
-        except ParseError as exc:
-            return self._parse_error(schema, exc)
+        except (ParseError, SchemaError) as exc:
+            return self._workspace_error(schema, exc)
         d = ws.by_id(ref)
         if d is None:
             return {
@@ -278,13 +300,19 @@ class MemdslMCPService:
             "status": "ok",
             "declaration": {
                 "id": d.id,
+                "type": d.kind,
                 "kind": d.kind,
+                "runtime_role": d.runtime_role,
+                "capabilities": sorted(d.capabilities),
                 "name": d.name,
                 "module": d.module,
                 "status": d.status,
                 "subject": d.subject,
                 "force": d.force,
                 "scope": d.scope,
+                "confidence": d.confidence,
+                "lifecycle": d.lifecycle,
+                "access_policy": d.access_policy,
                 "claim": d.claim_text,
                 "file": d.file,
                 "line": d.line,
@@ -326,8 +354,8 @@ class MemdslMCPService:
             }
         try:
             ws = self.workspace()
-        except ParseError as exc:
-            return self._parse_error(schema, exc)
+        except (ParseError, SchemaError) as exc:
+            return self._workspace_error(schema, exc)
         pack = check_compliance(
             ws, task_text, candidate_text,
             subject=subject or None,
@@ -340,7 +368,7 @@ class MemdslMCPService:
                 "Do not use the candidate. Revise it to remove every cited violation, then call memory_check again.")
         elif pack.verdict == "needs_review":
             next_actions.append(
-                "Do not assume approval. Route each unknown boundary to a human or semantic evaluator.")
+                "Do not assume approval. Route each unknown constraint to a human or semantic evaluator.")
         else:
             next_actions.append(
                 "The deterministic guard checks passed; continue to respect the cited MUST declarations.")
@@ -352,7 +380,7 @@ class MemdslMCPService:
             "rendered_text": pack.render_text(),
             "boundary": (
                 "BLOCK forbids the candidate. NEEDS_REVIEW is not approval: it means "
-                "an applicable natural-language boundary lacks a deterministic guard."
+                "an applicable natural-language constraint lacks a deterministic guard."
             ),
             "next_actions": next_actions,
         }
@@ -361,6 +389,7 @@ class MemdslMCPService:
         self,
         *,
         kind: Optional[str] = None,
+        memory_type: Optional[str] = None,
         subject: Optional[str] = None,
         include_inactive: bool = False,
         limit: int = 100,
@@ -369,19 +398,23 @@ class MemdslMCPService:
         schema = "memdsl.mcp.list.v1"
         try:
             ws = self.workspace()
-        except ParseError as exc:
-            return self._parse_error(schema, exc)
+        except (ParseError, SchemaError) as exc:
+            return self._workspace_error(schema, exc)
         limit = _clamp_int(limit, 1, 500, 100)
         pool = ws.declarations if include_inactive else ws.active()
         items = []
         for d in pool:
-            if kind and d.kind != kind:
+            requested_type = memory_type or kind
+            if requested_type and d.kind != requested_type:
                 continue
             if subject and d.subject != subject:
                 continue
             items.append({
                 "id": d.id,
+                "type": d.kind,
                 "kind": d.kind,
+                "runtime_role": d.runtime_role,
+                "capabilities": sorted(d.capabilities),
                 "subject": d.subject,
                 "scope": d.scope,
                 "status": d.status,
@@ -399,13 +432,35 @@ class MemdslMCPService:
             "next_actions": ["Call memory_explain on an id to see its evidence and relations."],
         }
 
+    def list_types(self) -> dict:
+        self.require_scope(SUMMARY_SCOPE)
+        schema = "memdsl.mcp.types.v1"
+        try:
+            ws = self.workspace()
+        except (ParseError, SchemaError) as exc:
+            return self._workspace_error(schema, exc)
+        items = []
+        for descriptor in ws.registry.descriptors():
+            items.append(descriptor.as_dict())
+        return {
+            "ok": True,
+            "schema_version": schema,
+            "status": "ok",
+            "total": len(items),
+            "schema_files": list(ws.registry.schema_files),
+            "types": items,
+            "next_actions": [
+                "Choose a loaded domain type whose runtime_role and required_fields match the memory being proposed.",
+            ],
+        }
+
     def lint_workspace(self) -> dict:
         self.require_scope(SUMMARY_SCOPE)
         schema = "memdsl.mcp.lint.v1"
         try:
             ws = self.workspace()
-        except ParseError as exc:
-            return self._parse_error(schema, exc)
+        except (ParseError, SchemaError) as exc:
+            return self._workspace_error(schema, exc)
         diags = lint(ws)
         errors = sum(1 for d in diags if d.severity == "error")
         warnings = sum(1 for d in diags if d.severity == "warning")
@@ -437,8 +492,8 @@ class MemdslMCPService:
         schema = "memdsl.mcp.propose.v1"
         try:
             ws = self.workspace()
-        except ParseError as exc:
-            return self._parse_error(schema, exc)
+        except (ParseError, SchemaError) as exc:
+            return self._workspace_error(schema, exc)
         result = self.review_store.create(
             ws, source, reason=reason, client=self.client_name)
         if not result["ok"]:
@@ -451,8 +506,8 @@ class MemdslMCPService:
                 "boundary": PROPOSE_BOUNDARY,
                 "next_actions": [
                     "Fix the declaration source: it must parse to exactly one declaration "
-                    "and pass lint against the live workspace (evidence with a verbatim "
-                    "quote is required for fact/preference/boundary/principle/decision/state).",
+                    "and pass lint against the live workspace (types with the "
+                    "requires_evidence capability need a verbatim evidence quote).",
                 ],
             }
         return {
@@ -503,8 +558,8 @@ class MemdslMCPService:
         schema = "memdsl.mcp.files.v1"
         try:
             ws = self.workspace()
-        except ParseError as exc:
-            return self._parse_error(schema, exc)
+        except (ParseError, SchemaError) as exc:
+            return self._workspace_error(schema, exc)
         per_file: dict = {}
         for d in ws.declarations:
             per_file[d.file] = per_file.get(d.file, 0) + 1

@@ -5,7 +5,7 @@
     memdsl check PATH...             preflight a draft against MUST rules
     memdsl explain PATH... ID        show one declaration with relations
     memdsl review <action> PATH...   human review queue for proposed writes
-    memdsl eval compliance PATH...   run boundary-compliance cases
+    memdsl eval compliance PATH...   run constraint-compliance cases
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from memdsl.model import Workspace
 from memdsl.parser import ParseError
 from memdsl.query import build_evidence_pack, explain
 from memdsl.review import ReviewStore, staging_dir_for
+from memdsl.schema import SchemaError
 
 
 def _load(paths: List[str]) -> Workspace:
@@ -34,6 +35,9 @@ def _load(paths: List[str]) -> Workspace:
         return Workspace.load(paths)
     except ParseError as e:
         print(f"parse error: {e}", file=sys.stderr)
+        sys.exit(2)
+    except SchemaError as e:
+        print(f"schema error: {e}", file=sys.stderr)
         sys.exit(2)
     except OSError as e:
         print(f"cannot read input: {e}", file=sys.stderr)
@@ -56,15 +60,20 @@ def main(argv: List[str] = None) -> int:
     p_query = sub.add_parser("query", help="query memory into an evidence pack")
     p_query.add_argument("paths", nargs="+", help=".mem files or directories")
     p_query.add_argument("-q", "--query", required=True, help="query text")
-    p_query.add_argument("--kind", action="append", dest="kinds",
-                         help="restrict to declaration kind (repeatable)")
+    p_query.add_argument("--type", "--kind", action="append", dest="kinds",
+                         help="restrict to memory type (repeatable; --kind is deprecated)")
     p_query.add_argument("--subject", help="restrict to a subject symbol")
     p_query.add_argument("--limit", type=int, default=8)
     p_query.add_argument("--json", action="store_true", help="JSON output")
 
     p_explain = sub.add_parser("explain", help="show one declaration")
     p_explain.add_argument("paths", nargs="+", help=".mem files or directories")
-    p_explain.add_argument("id", help="declaration id (kind:name or name)")
+    p_explain.add_argument("id", help="declaration id (type:name or name)")
+
+    p_types = sub.add_parser(
+        "types", help="list loaded standard and domain memory types")
+    p_types.add_argument("paths", nargs="+", help=".mem files or directories")
+    p_types.add_argument("--json", action="store_true", help="JSON output")
 
     p_check = sub.add_parser(
         "check", help="preflight a proposed action or draft against MUST rules")
@@ -77,7 +86,7 @@ def main(argv: List[str] = None) -> int:
     candidate.add_argument("--candidate-file",
                            help="read candidate text from a UTF-8 file")
     p_check.add_argument("--subject", help="explicit subject symbol")
-    p_check.add_argument("--scope", help="explicit boundary scope")
+    p_check.add_argument("--scope", help="explicit constraint scope")
     p_check.add_argument("--exception", action="append", default=[],
                          dest="exceptions",
                          help="assert an allowed exception (repeatable)")
@@ -118,7 +127,7 @@ def main(argv: List[str] = None) -> int:
     p_eval = sub.add_parser("eval", help="run reproducible evaluation suites")
     esub = p_eval.add_subparsers(dest="eval_kind", required=True)
     e_compliance = esub.add_parser(
-        "compliance", help="run boundary-compliance benchmark cases")
+        "compliance", help="run constraint-compliance benchmark cases")
     e_compliance.add_argument("paths", nargs="+",
                               help=".mem files or directories")
     e_compliance.add_argument("--cases", required=True,
@@ -150,6 +159,24 @@ def main(argv: List[str] = None) -> int:
     if args.command == "explain":
         ws = _load(args.paths)
         print(explain(ws, args.id))
+        return 0
+
+    if args.command == "types":
+        ws = _load(args.paths)
+        items = [descriptor.as_dict() for descriptor in ws.registry.descriptors()]
+        if args.json:
+            print(json.dumps({
+                "schema_version": "memdsl.types.v1",
+                "schema_files": list(ws.registry.schema_files),
+                "types": items,
+            }, indent=2, ensure_ascii=False))
+        else:
+            for item in items:
+                required = ",".join(item["required_fields"]) or "-"
+                capabilities = ",".join(item["capabilities"]) or "-"
+                print(
+                    f"{item['name']}  role={item['runtime_role']}  "
+                    f"required={required}  capabilities={capabilities}")
         return 0
 
     if args.command == "check":

@@ -63,7 +63,7 @@ class EvidencePack:
                              + (f" (exceptions: {d.fields['exceptions']})"
                                 if "exceptions" in d.fields else ""))
         else:
-            lines.append("- (no hard boundaries apply)")
+            lines.append("- (no constraints apply)")
         lines.append("")
         lines.append("SHOULD")
         if self.should:
@@ -77,8 +77,8 @@ class EvidencePack:
             for s in self.context:
                 d = s.declaration
                 extra = ""
-                if d.kind == "state" and "as_of" in d.fields:
-                    extra = f" (as_of {d.fields['as_of']})"
+                if d.has_capability("temporal") and d.lifecycle.get("as_of"):
+                    extra = f" (as_of {d.lifecycle['as_of']})"
                 lines.append(f"- [{d.id}] {d.claim_text}{extra}")
         else:
             lines.append("- (none)")
@@ -102,8 +102,13 @@ class EvidencePack:
         candidate instead of flattening both into one relevance list.
         """
         def decl(d: Declaration) -> dict:
-            out = {"id": d.id, "kind": d.kind, "claim": d.claim_text,
+            out = {"id": d.id, "type": d.kind, "kind": d.kind,
+                   "runtime_role": d.runtime_role,
+                   "capabilities": sorted(d.capabilities),
+                   "claim": d.claim_text,
                    "force": d.force, "scope": d.scope, "subject": d.subject,
+                   "confidence": d.confidence, "lifecycle": d.lifecycle,
+                   "access_policy": d.access_policy,
                    "status": d.status, "file": d.file, "line": d.line}
             if d.evidence:
                 out["evidence"] = d.evidence
@@ -133,7 +138,7 @@ def _score(decl: Declaration, query_terms: List[str],
     if decl.subject and decl.subject in subject_hits:
         score += 2.0
         matched.append(f"subject:{decl.subject}")
-    if score > 0 and str(decl.fields.get("confidence", "")) == "high":
+    if score > 0 and str(decl.confidence or "") == "high":
         score += 0.25
     return ScoredDeclaration(decl, score, matched)
 
@@ -144,12 +149,13 @@ def build_evidence_pack(
     kinds: Optional[List[str]] = None,
     subject: Optional[str] = None,
     limit: int = 8,
+    types: Optional[List[str]] = None,
 ) -> EvidencePack:
     """Run a query against the workspace and build a layered EvidencePack."""
     pack = EvidencePack(query=query)
     query_terms = _terms(query)
 
-    # alias resolution: map query words/phrases to entity symbols
+    # alias resolution: map query words/phrases to canonical symbols
     amap = ws.alias_map()
     subject_hits: List[str] = []
     lowered = query.lower()
@@ -161,11 +167,13 @@ def build_evidence_pack(
     pack.resolved_subjects = sorted(set(subject_hits))
 
     superseded = ws.superseded_ids()
+    type_filter = types if types is not None else kinds
     candidates = [
         d for d in ws.active()
-        if d.kind != "entity"
+        if d.runtime_role != "symbol"
+        and d.has_capability("searchable")
         and d.id not in superseded and d.name not in superseded
-        and (kinds is None or d.kind in kinds)
+        and (type_filter is None or d.kind in type_filter)
         and (subject is None or d.subject == subject)
     ]
 
@@ -176,10 +184,12 @@ def build_evidence_pack(
     hit_subjects = {s.declaration.subject for s in hits if s.declaration.subject}
     hit_scopes = {s.declaration.scope for s in hits if s.declaration.scope}
 
-    # MUST: hard boundaries that matched, or that share subject/scope
-    # with the matched declarations, or that are global.
+    # MUST: constraints that matched, share subject/scope with hits, or are
+    # global. Domain types reach this layer through runtime_role.
     for d in ws.active():
-        if d.kind != "boundary" or d.force not in (None, "hard"):
+        if d.runtime_role != "constraint":
+            continue
+        if d.id in superseded or d.name in superseded:
             continue
         relevant = (
             d.id in hit_ids
@@ -192,26 +202,24 @@ def build_evidence_pack(
 
     must_ids = {d.id for d in pack.must}
 
-    # SHOULD: strong preferences and active principles among the hits
+    # SHOULD: any domain type compiled to the guidance runtime role
     for s in hits:
         d = s.declaration
         if d.id in must_ids:
             continue
-        if (d.kind == "preference" and d.force == "strong") or d.kind == "principle":
+        if d.runtime_role == "guidance":
             pack.should.append(d)
 
     should_ids = {d.id for d in pack.should}
 
-    # CONTEXT: everything else that matched. `open_issue` never enters
-    # CONTEXT -- unresolved questions are gaps, not facts (SPEC §7 rule 3);
-    # they surface under MISSING below.
+    # CONTEXT: assertions among the remaining hits. Questions never become
+    # facts; custom types reach MISSING through the question runtime role.
     for s in hits:
         d = s.declaration
         if d.id in must_ids or d.id in should_ids:
             continue
-        if d.kind == "open_issue":
-            continue
-        pack.context.append(s)
+        if d.runtime_role == "assertion":
+            pack.context.append(s)
 
     # CONFLICT: declared conflicts among selected declarations
     selected = pack.must + pack.should + [s.declaration for s in pack.context]
@@ -228,9 +236,9 @@ def build_evidence_pack(
     if subject and not any(d.subject == subject for d in selected):
         pack.missing.append(f"no declarations found for subject '{subject}'")
     for s in scored:
-        if s.declaration.kind == "open_issue" and s.score > 0:
+        if s.declaration.runtime_role == "question" and s.score > 0:
             pack.missing.append(
-                f"open issue [{s.declaration.id}]: {s.declaration.claim_text}")
+                f"question [{s.declaration.id}]: {s.declaration.claim_text}")
 
     return pack
 
@@ -244,6 +252,8 @@ def explain(ws: Workspace, decl_id: str) -> str:
         f"{d.id}",
         f"  file:    {d.file}:{d.line}",
         f"  module:  {d.module or '(none)'}",
+        f"  type:    {d.kind}",
+        f"  role:    {d.runtime_role}",
         f"  status:  {d.status}",
     ]
     if d.subject:
@@ -252,6 +262,8 @@ def explain(ws: Workspace, decl_id: str) -> str:
         lines.append(f"  force:   {d.force}")
     if d.scope:
         lines.append(f"  scope:   {d.scope}")
+    if d.confidence is not None:
+        lines.append(f"  confidence: {d.confidence}")
     if d.claim_text:
         lines.append(f"  claim:   {d.claim_text}")
     rels = d.relations()
@@ -276,5 +288,9 @@ def explain(ws: Workspace, decl_id: str) -> str:
     if ev:
         lines.append("  evidence:")
         for k, v in ev.items():
+            lines.append(f"    {k}: {v}")
+    if d.access_policy:
+        lines.append("  access policy:")
+        for k, v in d.access_policy.items():
             lines.append(f"    {k}: {v}")
     return "\n".join(lines)

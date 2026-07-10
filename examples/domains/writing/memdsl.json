@@ -1,0 +1,4 @@
+{
+  "schema_version": "memdsl.workspace.v1",
+  "schemas": ["writing.memschema.json"]
+}

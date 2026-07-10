@@ -28,7 +28,7 @@ SERVER_NAME = "memdsl"
 SERVER_INSTRUCTIONS = (
     "memdsl serves agent memory written as .mem source files. Call "
     "memory_query first and obey the layered contract: MUST items are hard "
-    "rules to enforce, SHOULD items are strong preferences, CONTEXT items "
+    "constraints to enforce, SHOULD items are guidance, CONTEXT items "
     "are scored candidate facts, CONFLICT items must be surfaced to the "
     "user, and MISSING items are known gaps. Call memory_explain on a "
     "declaration id before citing it as evidence. Before returning or acting "
@@ -54,13 +54,18 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
 
     @mcp.resource("memdsl://status", mime_type="application/json")
     def memdsl_status() -> str:
-        """memdsl workspace status: files, declaration kinds, scopes."""
+        """memdsl workspace status: files, memory types, schemas, and scopes."""
         return _json(svc.status())
 
     @mcp.resource("memdsl://files", mime_type="application/json")
     def memdsl_files() -> str:
         """List .mem source files with their file ids."""
         return _json(svc.list_files())
+
+    @mcp.resource("memdsl://types", mime_type="application/json")
+    def memdsl_types() -> str:
+        """Loaded standard and domain memory types."""
+        return _json(svc.list_types())
 
     @mcp.resource("memdsl://file/{file_id}", mime_type="text/plain")
     def memdsl_file(file_id: str) -> str:
@@ -74,11 +79,14 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
     def memory_query(
         query: str,
         kinds: Optional[List[str]] = None,
+        types: Optional[List[str]] = None,
         subject: str = "",
         limit: int = 8,
     ) -> dict:
         """Query memory into a layered evidence pack (MUST/SHOULD/CONTEXT/CONFLICT/MISSING)."""
-        return svc.query(query, kinds=kinds, subject=subject or None, limit=limit)
+        return svc.query(
+            query, kinds=kinds, types=types,
+            subject=subject or None, limit=limit)
 
     @mcp.tool(name="memory_check")
     def memory_check(
@@ -88,13 +96,18 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         scope: str = "",
         exceptions: Optional[List[str]] = None,
     ) -> dict:
-        """Preflight a proposed action or draft against applicable MUST boundaries."""
+        """Preflight a proposed action or draft against applicable MUST constraints."""
         return svc.check(
             task, candidate,
             subject=subject or None,
             scope=scope or None,
             exceptions=exceptions,
         )
+
+    @mcp.tool(name="memory_types")
+    def memory_types() -> dict:
+        """List loaded domain memory types, runtime roles, capabilities, and required fields."""
+        return svc.list_types()
 
     @mcp.tool(name="memory_explain")
     def memory_explain(id: str) -> dict:
@@ -104,13 +117,15 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
     @mcp.tool(name="memory_list")
     def memory_list(
         kind: str = "",
+        memory_type: str = "",
         subject: str = "",
         include_inactive: bool = False,
         limit: int = 100,
     ) -> dict:
-        """Browse declarations, optionally filtered by kind or subject."""
+        """Browse declarations, optionally filtered by memory type or subject."""
         return svc.list_declarations(
             kind=kind or None,
+            memory_type=memory_type or None,
             subject=subject or None,
             include_inactive=include_inactive,
             limit=limit,
@@ -136,8 +151,8 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         """Brief an agent on how to use memdsl memory for a task."""
         return (
             "Before acting, call memory_query with the task's key nouns. "
-            "Treat MUST items as rules you enforce even when they seem "
-            "irrelevant, SHOULD items as strong preferences, and CONTEXT "
+            "Treat MUST items as constraints you enforce even when they seem "
+            "irrelevant, SHOULD items as guidance, and CONTEXT "
             "items as candidate facts. Surface CONFLICT items to the user "
             "instead of resolving them silently, and state MISSING gaps "
             "rather than guessing. Call memory_explain before citing any "
@@ -152,27 +167,18 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         return (
             "Turn the observation below into ONE .mem declaration and submit "
             "it with memory_propose. Rules:\n"
-            "- Pick the right kind: boundary (rule the agent must obey), "
-            "preference (shapes suggestions), fact, decision, state (use "
-            "as_of), or open_issue (unresolved question).\n"
+            "- Call memory_types first. Pick a loaded standard or domain type "
+            "whose runtime_role and required_fields match the observation.\n"
             "- Include a verbatim evidence quote from the source "
             "conversation; never invent or paraphrase quotes.\n"
-            "- Use an existing entity as subject (check memory_list "
-            "kind=entity) or declare the entity first in a separate proposal.\n"
+            "- Use an existing symbol declaration as subject. Call "
+            "memory_types to find types with runtime_role=symbol, then browse "
+            "that type with memory_list; declare the symbol separately if needed.\n"
             "- If it replaces an existing declaration, add "
             "supersedes: <old_id> instead of contradicting it.\n"
-            "Syntax example:\n\n"
-            "preference feedback.direct {\n"
-            "  subject: User\n"
-            "  claim: \"Prefers direct feedback on drafts.\"\n"
-            "  force: strong\n"
-            "  scope: global\n"
-            "  status: active\n"
-            "  evidence {\n"
-            "    source: chat\n"
-            "    quote: \"Just tell me what is wrong with it.\"\n"
-            "  }\n"
-            "}\n\n"
+            "- The declaration starts with the exact loaded type name, then "
+            "a stable memory id and a field block. Do not invent a type that "
+            "memory_types did not return.\n\n"
             f"Observation: {fact}"
         )
 
@@ -180,12 +186,14 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
 
 
 def inspection_payload(service: MemdslMCPService) -> dict:
+    status = service.status()
+    lint_result = service.lint_workspace()
     return {
-        "ok": True,
+        "ok": bool(status.get("ok") and lint_result.get("ok")),
         "server": SERVER_NAME,
         "tools": list(TOOL_NAMES),
-        "status": service.status(),
-        "lint": service.lint_workspace(),
+        "status": status,
+        "lint": lint_result,
     }
 
 
@@ -224,8 +232,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     if args.inspect:
-        print(_json(inspection_payload(service)))
-        return 0
+        payload = inspection_payload(service)
+        print(_json(payload))
+        return 0 if payload["ok"] else 1
 
     try:
         server = build_mcp_server(service=service)

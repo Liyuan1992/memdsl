@@ -1,15 +1,17 @@
 """Linter: code-style diagnostics for memory source.
 
-Implements the v0.4 rule set from the spec:
+Implements the v0.5 schema-driven rule set from the spec:
 
     unresolved_symbol           error    subject/relation target not defined
-    ambiguous_alias             warning  alias resolves to multiple entities
+    ambiguous_alias             warning  alias resolves to multiple symbols
     duplicate_declaration_id    error    same id declared twice
-    duplicate_declaration       warning  same kind+subject+scope+claim
+    duplicate_declaration       warning  same type+subject+scope+claim
     missing_evidence            error    active long-term declaration without evidence
-    boundary_without_exception  warning  hard boundary with no exceptions list
-    type_force_mismatch         warning  preference:hard or boundary:advisory
-    stale_state                 warning  state past valid_until / as_of too old
+    unknown_memory_type         error    no loaded schema defines this type
+    missing_required_field      error    type schema requires a missing field
+    unknown_type_field          error    strict type schema does not allow a field
+    type_force_mismatch         warning  force is outside the type schema policy
+    stale_memory                warning  temporal memory is expired or too old
     unmarked_supersede_status   warning  superseded target not marked superseded
     module_too_large            warning  module exceeds declaration budget
     invalid_guard               error    guard is not a nested block
@@ -29,11 +31,6 @@ from memdsl.model import Workspace, Declaration
 
 STALE_STATE_DAYS = 180
 MODULE_MAX_DECLARATIONS = 50
-
-#: Kinds that require evidence when active (entities and open issues are exempt).
-EVIDENCE_REQUIRED_KINDS = {
-    "fact", "preference", "boundary", "principle", "decision", "state",
-}
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _GUARD_FIELDS = {
@@ -63,6 +60,21 @@ def _parse_date(value) -> Optional[_dt.date]:
     return None
 
 
+def _present(d: Declaration, field_name: str) -> bool:
+    if field_name == "lifecycle":
+        return bool(d.lifecycle)
+    if field_name == "access_policy":
+        return bool(d.access_policy)
+    value = d.field(field_name)
+    return value not in (None, "", [], {})
+
+
+def _code(d: Declaration, capability: str, default: str) -> str:
+    if d.type_descriptor is None:
+        return default
+    return str(d.type_descriptor.diagnostic_codes.get(capability, default))
+
+
 def lint(ws: Workspace, today: Optional[_dt.date] = None) -> List[Diagnostic]:
     today = today or _dt.date.today()
     diags: List[Diagnostic] = []
@@ -81,7 +93,7 @@ def lint(ws: Workspace, today: Optional[_dt.date] = None) -> List[Diagnostic]:
         else:
             seen_ids[d.id] = d
 
-    # duplicate content (same kind+subject+scope+claim)
+    # duplicate content (same type+subject+scope+claim)
     seen_content = {}
     for d in ws.declarations:
         claim = d.claim_text.strip().lower()
@@ -92,7 +104,7 @@ def lint(ws: Workspace, today: Optional[_dt.date] = None) -> List[Diagnostic]:
             diags.append(Diagnostic(
                 "duplicate_declaration", "warning",
                 f"'{d.id}' duplicates '{seen_content[key].id}' "
-                f"(same kind/subject/scope/claim)",
+                f"(same type/subject/scope/claim)",
                 d.file, d.line, d.id))
         else:
             seen_content.setdefault(key, d)
@@ -101,20 +113,50 @@ def lint(ws: Workspace, today: Optional[_dt.date] = None) -> List[Diagnostic]:
     for alias, symbols in ws.alias_map().items():
         if len(set(symbols)) > 1:
             owners = ", ".join(sorted(set(symbols)))
-            entity = ws.by_id(sorted(set(symbols))[0])
+            symbol = ws.by_id(sorted(set(symbols))[0])
             diags.append(Diagnostic(
                 "ambiguous_alias", "warning",
-                f"alias '{alias}' resolves to multiple entities: {owners}",
-                entity.file if entity else "<workspace>",
-                entity.line if entity else 0))
+                f"alias '{alias}' resolves to multiple symbols: {owners}",
+                symbol.file if symbol else "<workspace>",
+                symbol.line if symbol else 0))
 
     for d in ws.declarations:
+        descriptor = d.type_descriptor
+
+        if descriptor is None:
+            diags.append(Diagnostic(
+                "unknown_memory_type", "error",
+                f"memory type '{d.kind}' is not defined by any loaded schema",
+                d.file, d.line, d.id))
+        else:
+            for required in descriptor.required_fields:
+                if _present(d, required):
+                    continue
+                code = "missing_evidence" if required == "evidence" else "missing_required_field"
+                message = (
+                    f"active {d.kind} '{d.name}' has no evidence block "
+                    f"(use lifecycle.status: candidate for unconfirmed memories)"
+                    if required == "evidence"
+                    else f"memory type '{d.kind}' requires field '{required}'"
+                )
+                if required != "evidence" or d.status == "active":
+                    diags.append(Diagnostic(
+                        code, "error", message, d.file, d.line, d.id))
+
+            if not descriptor.allow_extra_fields:
+                unknown_fields = sorted(set(d.fields) - descriptor.allowed_fields)
+                for field_name in unknown_fields:
+                    diags.append(Diagnostic(
+                        "unknown_type_field", "error",
+                        f"memory type '{d.kind}' does not allow field '{field_name}'",
+                        d.file, d.line, d.id))
+
         # unresolved subject symbol
         subject = d.subject
         if subject and subject not in known:
             diags.append(Diagnostic(
                 "unresolved_symbol", "error",
-                f"subject '{subject}' is not a declared entity or known symbol",
+                f"subject '{subject}' is not a declared symbol",
                 d.file, d.line, d.id))
 
         # unresolved relation targets
@@ -127,45 +169,56 @@ def lint(ws: Workspace, today: Optional[_dt.date] = None) -> List[Diagnostic]:
                         f"relation '{rel}' points to unknown declaration '{target}'",
                         d.file, d.line, d.id))
 
-        # missing evidence
-        if (d.kind in EVIDENCE_REQUIRED_KINDS
+        # evidence capability (covers defaults and schemas that prefer a
+        # capability over listing evidence in required_fields)
+        if (descriptor is not None
+                and descriptor.has_capability("requires_evidence")
                 and d.status == "active"
-                and d.evidence is None):
+                and d.evidence is None
+                and "evidence" not in descriptor.required_fields):
             diags.append(Diagnostic(
                 "missing_evidence", "error",
                 f"active {d.kind} '{d.name}' has no evidence block "
-                f"(use status: candidate for unconfirmed memories)",
+                f"(use lifecycle.status: candidate for unconfirmed memories)",
                 d.file, d.line, d.id))
 
-        # boundary without exception
-        if d.kind == "boundary" and "exceptions" not in d.fields:
+        # schemas can recommend explicit exceptions for constraints
+        if (descriptor is not None
+                and descriptor.has_capability("exceptions_recommended")
+                and "exceptions" not in d.fields):
             diags.append(Diagnostic(
-                "boundary_without_exception", "warning",
-                f"boundary '{d.name}' declares no exceptions; confirm it is "
+                _code(d, "exceptions_recommended", "missing_recommended_exceptions"),
+                "warning",
+                f"constraint '{d.id}' declares no exceptions; confirm it is "
                 f"truly unconditional or add e.g. [user_explicit_override]",
                 d.file, d.line, d.id))
 
-        # executable compliance guard
-        if d.kind == "boundary" and "guard" in d.fields:
+        # executable compliance guard is a capability, not a hard-coded type
+        if "guard" in d.fields:
             guard = d.fields.get("guard")
+            if descriptor is not None and not descriptor.has_capability("guardable"):
+                diags.append(Diagnostic(
+                    "unsupported_type_capability", "error",
+                    f"memory type '{d.kind}' does not support guard",
+                    d.file, d.line, d.id))
             if not isinstance(guard, dict):
                 diags.append(Diagnostic(
                     "invalid_guard", "error",
-                    f"boundary '{d.name}' guard must be a nested block",
+                    f"memory '{d.id}' guard must be a nested block",
                     d.file, d.line, d.id))
             else:
                 unknown = sorted(set(guard) - _GUARD_FIELDS)
                 if unknown:
                     diags.append(Diagnostic(
                         "unknown_guard_field", "warning",
-                        f"boundary '{d.name}' guard has unknown field(s): "
+                        f"memory '{d.id}' guard has unknown field(s): "
                         f"{', '.join(unknown)}",
                         d.file, d.line, d.id))
                 if not any(guard.get(key) for key in (
                         "deny_any", "deny_regex", "require_any", "require_regex")):
                     diags.append(Diagnostic(
                         "guard_without_rule", "warning",
-                        f"boundary '{d.name}' guard has no deny or require condition",
+                        f"memory '{d.id}' guard has no deny or require condition",
                         d.file, d.line, d.id))
                 for field_name in ("deny_regex", "require_regex"):
                     raw = guard.get(field_name, [])
@@ -176,44 +229,62 @@ def lint(ws: Workspace, today: Optional[_dt.date] = None) -> List[Diagnostic]:
                         except re.error as exc:
                             diags.append(Diagnostic(
                                 "invalid_guard_regex", "error",
-                                f"boundary '{d.name}' {field_name} pattern "
+                                f"memory '{d.id}' {field_name} pattern "
                                 f"{pattern!r} is invalid: {exc}",
                                 d.file, d.line, d.id))
 
-        # type/force mismatch
-        if d.kind == "preference" and d.force == "hard":
+        # force policy comes from the type descriptor
+        if (descriptor is not None and d.force
+                and descriptor.allowed_forces
+                and d.force not in descriptor.allowed_forces):
             diags.append(Diagnostic(
                 "type_force_mismatch", "warning",
-                f"preference '{d.name}' uses force: hard; promote it to a "
-                f"boundary or lower its force",
-                d.file, d.line, d.id))
-        if d.kind == "boundary" and d.force == "advisory":
-            diags.append(Diagnostic(
-                "type_force_mismatch", "warning",
-                f"boundary '{d.name}' uses force: advisory; demote it to a "
-                f"preference or raise its force",
+                f"memory type '{d.kind}' does not allow force '{d.force}'; "
+                f"allowed: {', '.join(descriptor.allowed_forces)}",
                 d.file, d.line, d.id))
 
-        # stale state
-        if d.kind == "state" and d.status == "active":
-            valid_until = _parse_date(d.fields.get("valid_until"))
-            as_of = _parse_date(d.fields.get("as_of"))
+        # temporal lifecycle is also schema-driven
+        if (descriptor is not None
+                and descriptor.has_capability("temporal")
+                and d.status == "active"):
+            valid_until = _parse_date(d.lifecycle.get("valid_until"))
+            as_of = _parse_date(d.lifecycle.get("as_of"))
+            stale_code = _code(d, "stale", "stale_memory")
             if valid_until is not None and valid_until < today:
                 diags.append(Diagnostic(
-                    "stale_state", "warning",
-                    f"state '{d.name}' expired on {valid_until.isoformat()}",
+                    stale_code, "warning",
+                    f"temporal memory '{d.id}' expired on {valid_until.isoformat()}",
                     d.file, d.line, d.id))
             elif as_of is not None and (today - as_of).days > STALE_STATE_DAYS:
                 diags.append(Diagnostic(
-                    "stale_state", "warning",
-                    f"state '{d.name}' as_of {as_of.isoformat()} is older than "
+                    stale_code, "warning",
+                    f"temporal memory '{d.id}' as_of {as_of.isoformat()} is older than "
                     f"{STALE_STATE_DAYS} days; re-confirm or supersede it",
                     d.file, d.line, d.id))
-            if as_of is None and "as_of" not in d.fields:
+            if as_of is None and "as_of" not in d.lifecycle:
                 diags.append(Diagnostic(
-                    "stale_state", "warning",
-                    f"state '{d.name}' has no as_of date; states must be datable",
+                    stale_code, "warning",
+                    f"temporal memory '{d.id}' has no as_of date",
                     d.file, d.line, d.id))
+
+        # access policy is part of the universal declaration envelope
+        access_key = "access_policy" if "access_policy" in d.fields else "access"
+        if access_key in d.fields:
+            policy = d.fields.get(access_key)
+            if not isinstance(policy, dict):
+                diags.append(Diagnostic(
+                    "invalid_access_policy", "error",
+                    f"memory '{d.id}' access policy must be a nested block",
+                    d.file, d.line, d.id))
+            else:
+                allowed_access = {"readers", "writers", "reviewers", "export"}
+                unknown_access = sorted(set(policy) - allowed_access)
+                if unknown_access:
+                    diags.append(Diagnostic(
+                        "unknown_access_policy_field", "warning",
+                        f"memory '{d.id}' access policy has unknown field(s): "
+                        f"{', '.join(unknown_access)}",
+                        d.file, d.line, d.id))
 
     # superseded targets whose status is not updated
     for target in superseded_targets:

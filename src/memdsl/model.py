@@ -1,4 +1,4 @@
-"""Workspace model: declarations, symbol table, alias resolution."""
+"""Domain-neutral memory records, symbol table, and workspace loading."""
 
 from __future__ import annotations
 
@@ -7,13 +7,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional
 
 from memdsl.parser import Document, RawDeclaration, parse_file
-
-#: Declaration kinds understood by v0.4 typed rules. Other kinds parse
-#: fine but get no kind-specific behavior.
-CORE_KINDS = {
-    "entity", "fact", "preference", "boundary", "principle",
-    "decision", "state", "open_issue",
-}
+from memdsl.schema import TypeDescriptor, TypeRegistry, registry_for_paths
 
 #: Relation field names recognized inside a `relations { ... }` block
 #: or as top-level fields.
@@ -34,33 +28,87 @@ class Declaration:
     file: str
     line: int
     module: Optional[str] = None
+    type_descriptor: Optional[TypeDescriptor] = field(default=None, repr=False)
 
     @property
     def id(self) -> str:
         return f"{self.kind}:{self.name}"
 
     @property
+    def type_name(self) -> str:
+        return self.kind
+
+    def field(self, name: str, default=None):
+        if name in self.fields:
+            return self.fields[name]
+        if self.type_descriptor and name in self.type_descriptor.defaults:
+            return self.type_descriptor.defaults[name]
+        return default
+
+    @property
     def status(self) -> str:
-        return str(self.fields.get("status", "active"))
+        lifecycle = self.fields.get("lifecycle")
+        if isinstance(lifecycle, dict) and "status" in lifecycle:
+            return str(lifecycle["status"])
+        return str(self.field("status", "active"))
 
     @property
     def force(self) -> Optional[str]:
-        v = self.fields.get("force")
+        v = self.field("force")
         return str(v) if v is not None else None
 
     @property
     def subject(self) -> Optional[str]:
-        v = self.fields.get("subject")
+        v = self.field("subject")
         return str(v) if v is not None else None
 
     @property
     def scope(self) -> Optional[str]:
-        v = self.fields.get("scope")
+        v = self.field("scope")
         return str(v) if v is not None else None
+
+    @property
+    def confidence(self):
+        return self.field("confidence")
+
+    @property
+    def lifecycle(self) -> dict:
+        nested = self.fields.get("lifecycle")
+        result = dict(nested) if isinstance(nested, dict) else {}
+        for key in ("status", "as_of", "valid_until"):
+            if key not in result and self.field(key) is not None:
+                result[key] = self.field(key)
+        if "status" not in result:
+            result["status"] = "active"
+        return result
+
+    @property
+    def access_policy(self) -> dict:
+        value = self.field("access_policy", self.field("access"))
+        return dict(value) if isinstance(value, dict) else {}
+
+    @property
+    def runtime_role(self) -> str:
+        if self.type_descriptor is None:
+            return "unknown"
+        return self.type_descriptor.role_for(self.fields)
+
+    @property
+    def capabilities(self) -> frozenset:
+        if self.type_descriptor is None:
+            return frozenset()
+        return self.type_descriptor.capabilities
+
+    def has_capability(self, name: str) -> bool:
+        return name in self.capabilities
 
     @property
     def claim_text(self) -> str:
         """The primary human-readable statement of this declaration."""
+        if self.type_descriptor is not None:
+            claim = self.type_descriptor.claim_for(self.fields)
+            if claim:
+                return claim
         for key in ("claim", "rule", "decision", "pattern", "summary"):
             v = self.fields.get(key)
             if isinstance(v, str):
@@ -69,14 +117,14 @@ class Declaration:
 
     @property
     def evidence(self) -> Optional[dict]:
-        v = self.fields.get("evidence")
+        v = self.field("evidence")
         return v if isinstance(v, dict) else None
 
     def relations(self) -> Dict[str, List[str]]:
         """All relations declared on this declaration, normalized to lists."""
         out: Dict[str, List[str]] = {}
         sources = [self.fields]
-        rel_block = self.fields.get("relations")
+        rel_block = self.field("relations")
         if isinstance(rel_block, dict):
             sources.append(rel_block)
         for src in sources:
@@ -96,6 +144,13 @@ class Declaration:
                 parts.extend(str(x) for x in v)
             elif isinstance(v, str):
                 parts.append(v)
+        if self.type_descriptor:
+            for key in self.type_descriptor.search_fields:
+                value = self.field(key)
+                if isinstance(value, list):
+                    parts.extend(str(item) for item in value)
+                elif isinstance(value, str):
+                    parts.append(value)
         return " ".join(parts).lower()
 
 
@@ -103,14 +158,21 @@ class Declaration:
 class Workspace:
     declarations: List[Declaration] = field(default_factory=list)
     files: List[str] = field(default_factory=list)
+    registry: TypeRegistry = field(default_factory=TypeRegistry.standard, repr=False)
 
     # ---- construction ----
 
     @classmethod
-    def load(cls, paths: Iterable[str]) -> "Workspace":
+    def load(
+        cls,
+        paths: Iterable[str],
+        *,
+        registry: Optional[TypeRegistry] = None,
+    ) -> "Workspace":
         """Load one or more `.mem` files or directories (recursive)."""
-        ws = cls()
-        for path in paths:
+        path_list = [str(path) for path in paths]
+        ws = cls(registry=registry or registry_for_paths(path_list))
+        for path in path_list:
             if os.path.isdir(path):
                 for root, _dirs, names in os.walk(path):
                     for name in sorted(names):
@@ -125,7 +187,8 @@ class Workspace:
         for raw in doc.declarations:
             self.declarations.append(
                 Declaration(kind=raw.kind, name=raw.name, fields=raw.fields,
-                            file=raw.file, line=raw.line, module=raw.module)
+                            file=raw.file, line=raw.line, module=raw.module,
+                            type_descriptor=self.registry.resolve(raw.kind))
             )
 
     # ---- lookups ----
@@ -137,7 +200,7 @@ class Workspace:
         return None
 
     def entities(self) -> List[Declaration]:
-        return [d for d in self.declarations if d.kind == "entity"]
+        return [d for d in self.declarations if d.runtime_role == "symbol"]
 
     def known_names(self) -> set:
         names = set()
@@ -147,19 +210,17 @@ class Workspace:
         return names
 
     def known_symbols(self) -> set:
-        """Entity names plus their canonical names."""
+        """Symbol names plus their canonical names."""
         symbols = set()
         for e in self.entities():
             symbols.add(e.name)
             cn = e.fields.get("canonical_name")
             if isinstance(cn, str):
                 symbols.add(cn)
-        # Common implicit subjects
-        symbols.add("User")
         return symbols
 
     def alias_map(self) -> Dict[str, List[str]]:
-        """Lowercased alias -> list of entity symbols it may refer to."""
+        """Lowercased alias -> list of canonical symbols it may refer to."""
         amap: Dict[str, List[str]] = {}
         for e in self.entities():
             aliases = e.fields.get("aliases", [])
@@ -169,7 +230,7 @@ class Workspace:
         return amap
 
     def resolve_alias(self, text: str) -> List[str]:
-        """Resolve a natural-language mention to candidate entity symbols."""
+        """Resolve a natural-language mention to candidate symbols."""
         return self.alias_map().get(text.lower(), [])
 
     def active(self) -> List[Declaration]:

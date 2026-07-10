@@ -1,428 +1,466 @@
 # Memory DSL Specification
 
-Version: 0.4 (draft)
-Status: reference specification for the `memdsl` v0.4 implementation
-License: [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) — you may share and adapt this document with attribution.
+Version: 0.5 (draft)
+Status: reference specification for the `memdsl` v0.5 implementation
+License: [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
 
 ## 1. Core thesis
 
-Memory DSL is not a language for humans to program in, and not a database
-schema. It is an **LLM-first, declarative source language for long-term
-memory**: memory gets names, modules, types, references, scopes, evidence,
-lifecycle, and diagnostics — so an LLM can read memory the way it reads
-code, query it precisely, maintain it safely, and *obey* it when answering.
+Memory DSL is an LLM-first, declarative source language for governed
+long-term memory. Memory gets stable ids, evidence, scope, confidence,
+lifecycle, access policy, relations, diagnostics, and behavioral roles so an
+agent can read memory the way it reads code.
 
-Code makes LLMs stronger not because of syntax, but because code provides
-cognitive scaffolding:
+Version 0.5 separates two layers that earlier versions mixed together:
 
-- **Stable symbols** — the same thing always has the same name.
-- **Module boundaries** — read only the relevant file, not the whole corpus.
-- **Typed contracts** — the type tells you the fields, behavior, and constraints.
-- **References** — a declaration knows what it supports, refines, supersedes, or conflicts with.
-- **Scopes** — a declaration knows when it applies and when it does not.
-- **Diagnostics** — duplicates, dangling references, conflicts, and staleness are reported, not silently accumulated.
+```text
+core memory record     claim / evidence / scope / confidence / lifecycle /
+                       access policy / relations
 
-Memory DSL replicates these structural capabilities. It does not replicate
-the surface syntax of Python, SQL, or YAML.
+domain type system     coding.project_rule / assistant.commitment /
+                       writing.voice_preference / any workspace-defined type
+```
 
-The defining feature relative to other memory systems is that declarations
-are **normative**: a `boundary` is not a fact to be recalled, it is a rule
-to be enforced. Retrieval output separates what an agent MUST respect from
-what it SHOULD consider and what is merely context.
+The core does not own a universal taxonomy of human memory. A coding agent,
+personal assistant, writing system, and research tool may define different
+types without changing memdsl Python code.
+
+Domain types compile to a small stable set of **runtime roles**. Runtime roles
+tell query and compliance how to behave; domain types tell users what a
+memory means in their own field.
 
 ## 2. Non-goals
 
-Version 0.4 deliberately does not attempt:
+Version 0.5 deliberately does not attempt:
 
-- Turing completeness, loops, functions, or runtime computation.
-- Replacing databases, knowledge graphs, or vector stores (they are
-  compilation targets and fallbacks, not the source of truth).
-- Turning every conversational utterance into long-term memory.
-- Fully automatic write approval (see §10; agent writes remain reviewed).
-- Pretending that unstructured natural-language boundaries can be checked
-  deterministically. They fail safely to `needs_review` (see §7.2).
-- Multi-user permission models.
+- Turing completeness, loops, functions, or arbitrary runtime computation.
+- Replacing databases, vector stores, or knowledge graphs.
+- Defining one correct ontology for all people and domains.
+- Fully automatic write approval; agent writes remain human-reviewed.
+- Identity-provider integration or complete multi-tenant authorization.
+  Access policy is represented, validated, and transported, while external
+  runtimes remain responsible for binding identities to it.
+- Pretending arbitrary natural-language constraints can be checked
+  deterministically. Unexecutable constraints produce `needs_review`.
 
-## 3. File model
+## 3. Workspace and schema model
 
 ### 3.1 Workspace
 
-A workspace is a directory tree of `.mem` source files. Example layout:
+A workspace is one or more `.mem` files or directories. A directory may
+contain `memdsl.json`:
 
-```text
-memories/
-  self/
-  projects/
-  work/
-  relationships/
+```json
+{
+  "schema_version": "memdsl.workspace.v1",
+  "schemas": [
+    "coding.memschema.json",
+    "company-policy.memschema.json"
+  ]
+}
 ```
 
-### 3.2 Module
+Schema paths are relative to the manifest. The built-in
+`memdsl.standard@1` type pack is always loaded for backward compatibility.
+Workspace schemas add namespaced domain types to the same `TypeRegistry`.
+`schema_version` is required and must currently be `memdsl.workspace.v1`;
+unsupported manifest versions fail closed.
 
-A module is the unit of local reading — the equivalent of a source file or
-package. Modules are organized by *what questions read together*, not by
-data source:
+Schema parse errors, missing files, incompatible duplicate type names, and
+invalid runtime roles fail closed before memory files are served.
 
-```text
-self.identity        self.preferences      self.boundaries
-projects.<name>.*    work.<name>           relationships.people
-```
+### 3.2 Modules
 
-Do **not** create modules per chat session, per day, per tag, or per
-declaration. Sources belong in evidence; tags are indexes, not reading
-boundaries.
-
-A module is declared at the top of a file, with optional imports:
+A module is a local reading boundary declared in `.mem` source:
 
 ```mem
 module projects.aurora
-
-use User
 use Project.Aurora
 ```
 
-## 4. Declarations
+Modules group declarations that answer related questions. Sources belong in
+evidence; they should not become one module per chat session or day.
 
-A declaration is the smallest independently referencable, independently
-falsifiable unit of memory:
+### 3.3 Schema files
+
+A `.memschema.json` file defines domain types:
+
+```json
+{
+  "name": "coding",
+  "version": "1",
+  "types": {
+    "project_rule": {
+      "runtime_role": "constraint",
+      "required_fields": ["claim", "evidence", "scope"],
+      "optional_fields": ["rationale", "owner"],
+      "search_fields": ["rationale", "owner"],
+      "capabilities": [
+        "requires_evidence",
+        "searchable",
+        "enforceable",
+        "guardable"
+      ],
+      "defaults": {"force": "hard", "status": "active"},
+      "allowed_forces": ["hard"],
+      "allow_extra_fields": false
+    }
+  }
+}
+```
+
+The registered type name is `coding.project_rule`. Namespaces prevent two
+domain packs from accidentally redefining each other's vocabulary.
+
+Schemas may also be registered programmatically with `TypeRegistry` and
+`TypeDescriptor`.
+
+## 4. Universal memory record
+
+A declaration is the smallest independently citable and reviewable memory:
 
 ```mem
-preference schedule.deep_work_mornings {
-  subject: User
-  claim: "Prefers deep work in the morning; meetings after 2pm."
-  force: strong
-  scope: scheduling
+coding.project_rule git.no_force_push {
+  subject: Repository.Memdsl
+  claim: "Never force-push the main branch."
+  scope: repository("memdsl")
   confidence: high
-  status: active
-  evidence {
-    source: chat
-    quote: "Stop booking me into morning meetings."
-  }
-}
-```
-
-Every declaration answers: what is this memory called, what type is it,
-who is it about, what does it assert, where does it apply, what evidence
-backs it, and how does it relate to other memories.
-
-### 4.1 Kinds (v0.4)
-
-| Kind | Purpose | Typical behavior |
-| --- | --- | --- |
-| `entity` | Define a stable object and its aliases | Enters the symbol table; referenced by other declarations |
-| `fact` | Stable fact | Background context; conflicts require evidence comparison |
-| `preference` | A liking or inclination | Advisory by default; shapes suggestions, never forbids |
-| `boundary` | Hard rule / prohibition / permission edge | MUST be respected; requires `exceptions` |
-| `principle` | Long-term principle or methodology | Shapes judgment; conflicts must be surfaced, not silently resolved |
-| `decision` | A choice that was made | Needs `reason` / `alternatives` / `result`; superseded by newer decisions |
-| `state` | Current status | Needs `as_of`; goes stale; superseded by newer states |
-| `open_issue` | Unresolved question | Never treated as fact; needs `next_action` |
-
-A type is a semantic contract, not a tag. `preference` and `boundary` may
-share a topic, but they bind an agent with completely different strength.
-
-Reserved for future versions (parse but no typed behavior in v0.4):
-`goal`, `relationship`, `skill`, `lesson`, `behavior_event`,
-`behavior_pattern`, `habit`, `personhood_signal`, `counter_evidence`,
-`motive_hypothesis`.
-
-### 4.2 Force
-
-```text
-advisory   default consideration, may be overridden by the task at hand
-strong     needs a visible reason to deviate
-hard       binding unless a declared exception fires or the user overrides
-```
-
-"I don't like early mornings" is a `preference` with `force: advisory`.
-Only explicit constraint language — "never", "don't schedule", "unless I
-say so" — justifies a `boundary` with `force: hard`.
-
-### 4.3 Scope
-
-Scope limits where a declaration applies, preventing local preferences
-from leaking into global personality:
-
-```text
-global    personal_routine    scheduling
-project("Aurora")    work("User.DayJob")    relationship("Person.X")
-```
-
-### 4.4 Evidence
-
-Evidence is the source map of a declaration. Active long-term declarations
-**must** carry evidence; unconfirmed ones use `status: candidate`.
-
-```mem
-evidence {
-  source: chat
-  quote: "No meetings before ten. I mean it."
-}
-```
-
-Evidence stores provenance, not conclusions. Answers cite declaration ids;
-audits follow the evidence.
-
-### 4.5 Relations
-
-```text
-supports    refines    depends_on    part_of
-supersedes  conflicts_with  derived_from  related_to
-```
-
-`supersedes` makes the old declaration non-current (it must then be marked
-`status: superseded`). `conflicts_with` keeps both alive and forces the
-conflict to be shown at answer time. Overuse of `related_to` is a smell.
-
-### 4.6 Status lifecycle
-
-```text
-candidate -> active -> stale? -> superseded | retracted | archived
-```
-
-`state` declarations stale quickly and need `as_of`. `boundary` and
-`principle` should rarely expire but may be superseded or retracted.
-
-### 4.7 Executable boundary guards (v0.4)
-
-A boundary may carry a deterministic `guard` block for preflight checks:
-
-```mem
-boundary privacy.no_family_in_public {
-  subject: User
-  rule: "Never include family details in public-facing content."
-  force: hard
-  scope: global
-  exceptions: [user_explicit_override]
-  status: active
-  guard {
-    when_any: ["public", "blog", "social media"]
-    deny_any: ["family", "wife", "daughter", "son"]
+  lifecycle { status: active }
+  access_policy {
+    readers: [owner, coding_agent]
+    writers: [maintainer]
+    reviewers: [maintainer]
+    export: internal
   }
   evidence {
-    source: chat
-    quote: "Anything about my family stays out of public posts."
+    source: AGENTS.md
+    quote: "Do not force-push."
   }
 }
 ```
 
-Supported guard fields:
+Universal fields:
 
 | Field | Meaning |
 | --- | --- |
-| `when_any` | Activate the guard when any phrase occurs in task or candidate |
-| `deny_any` | Violate when any phrase occurs in the candidate |
-| `deny_regex` | Violate when any case-insensitive regex matches the candidate |
-| `require_any` | Violate unless at least one phrase occurs in the candidate |
-| `require_regex` | Violate unless at least one regex matches the candidate |
+| `subject` | Stable symbol this memory is about |
+| `claim` | Primary human-readable assertion or rule |
+| `evidence` | Provenance and verbatim source material |
+| `scope` | Where the memory applies |
+| `confidence` | Confidence supplied by the author or extraction process |
+| `lifecycle` | Status and temporal validity |
+| `access_policy` | Readers, writers, reviewers, and export posture |
+| `relations` | Typed links to other memories |
+| `force` | Optional binding strength used by type schemas |
+| `guard` / `exceptions` | Optional deterministic compliance data |
 
-String matching is case-insensitive. Regex matching is case-insensitive and
-multiline. A named exception only fires when it appears both in the
-declaration's `exceptions` list and in the caller's explicit exception set.
-Unknown exceptions never waive a boundary.
+Type schemas may add domain fields such as `symptoms`, `fix`, `cadence`,
+`counterparty`, `traits`, or `example`.
 
-## 5. Symbols and aliases
+### 4.1 Evidence
 
-Every long-lived object gets one canonical symbol:
+Evidence is a source map, not a conclusion:
 
 ```mem
-entity User.DayJob {
-  kind: Employment
-  canonical_name: "DayJob"
-  aliases: ["work", "day job", "the office"]
-  status: active
+evidence {
+  source: issue_tracker
+  quote: "The duplicate write occurred under concurrent approval."
 }
 ```
 
-Natural-language mentions resolve through the alias table to the canonical
-symbol at both write time and query time. If an alias is ambiguous
-(resolves to several symbols), the system must not guess — it raises an
-`ambiguous_alias` diagnostic or an `open_issue` for review.
+Types with the `requires_evidence` capability fail lint when an active
+declaration lacks evidence. Candidate memories may remain unconfirmed.
 
-## 6. Granularity
+### 4.2 Scope
 
-A declaration should be split when the parts can independently expire,
-independently conflict, or carry different force or scope. It should be
-merged when the parts share subject, kind, scope, and force, and would
-always change together.
-
-Too fine: fragments with no causal texture, relation spam, maintenance
-explosion. Too coarse: cannot cite, cannot supersede, cannot mark partial
-conflicts.
-
-Rule of thumb: evidence stays verbatim; declarations are medium-grained;
-threads/summaries navigate; vectors are a fallback.
-
-## 7. Querying and checking
-
-### 7.1 The EvidencePack contract
-
-A query returns a **layered evidence pack**, not a flat hit list:
+Scope prevents local rules from leaking globally:
 
 ```text
-MUST      hard boundaries in scope        -> the agent must respect these
-SHOULD    strong preferences, principles  -> deviate only with reason
-CONTEXT   facts, states, decisions        -> background, citable by id
-CONFLICT  declared conflicts among selected declarations
-MISSING   explicit gaps and open issues   -> say "I don't know", don't guess
+global
+calendar
+repository("memdsl")
+component("review")
+relationship("Person.Editor")
+publication("team_blog")
 ```
 
-Layering rules:
+Scopes are domain values. The core stores and compares them without owning
+their ontology.
 
-1. Hard boundaries that share scope or subject with the matched
-   declarations — or are global — always surface in MUST, even if the
-   query did not lexically match them.
-2. Superseded, retracted, and archived declarations never surface by
-   default.
-3. `open_issue` declarations surface under MISSING, never as facts.
-4. Every surfaced item is cited by declaration id so the final answer can
-   reference and be audited against it.
+### 4.3 Confidence
 
-The retrieval scoring behind this contract is pluggable. The reference
-implementation uses lexical overlap plus alias resolution; production
-systems should substitute BM25 and/or embeddings *behind the same
-contract*.
+Confidence is part of the universal record. The reference lexical retriever
+uses `high` as a small tie-break boost; domain runtimes may interpret richer
+confidence policies behind the same record contract.
 
-### 7.2 The CompliancePack contract (v0.4)
+### 4.4 Lifecycle
 
-`memdsl check` and MCP `memory_check` preflight a proposed action, answer,
-or draft. They return:
+Preferred v0.5 form:
+
+```mem
+lifecycle {
+  status: active
+  as_of: 2026-07-10
+  valid_until: 2026-12-31
+}
+```
+
+Lifecycle statuses include `candidate`, `active`, `superseded`, `retracted`,
+and `archived`. For backward compatibility, top-level `status`, `as_of`, and
+`valid_until` still compile into the same lifecycle record.
+
+Types with the `temporal` capability receive staleness diagnostics.
+
+### 4.5 Access policy
+
+```mem
+access_policy {
+  readers: [owner, coding_agent]
+  writers: [owner]
+  reviewers: [owner, maintainer]
+  export: denied
+}
+```
+
+v0.5 validates and exposes access policy through Python, JSON, CLI, and MCP.
+The reference runtime does not claim to authenticate these identities; an
+embedding application must bind its principals to the policy.
+
+### 4.6 Relations
+
+Built-in relation names:
 
 ```text
-verdict              allow | block | needs_review
-applicable_must      hard boundaries considered for this action
-violations           failed guard checks, cited by boundary id
-asserted_exceptions   exception names supplied by the caller
-exceptions_applied   declared exceptions explicitly asserted by the caller
-unknowns             applicable rules that cannot be checked deterministically
+supports  refines  depends_on  part_of  supersedes
+conflicts_with  derived_from  related_to  revision_of
 ```
 
-Compliance applicability is narrower than EvidencePack retrieval. A hard
-boundary is considered when it is global, matches an explicitly supplied
-subject or scope, directly overlaps the task/candidate lexically, or has a
-`when_any` guard trigger present in the task/candidate. The
-checker does not fan enforcement out merely because two declarations share
-a subject.
+`supersedes` removes the target from default query results.
+`conflicts_with` keeps both declarations visible under CONFLICT.
 
-Verdict rules are fail-safe:
+## 5. Extensible type system
 
-1. Any guard violation produces `block`.
-2. With no violation, any applicable boundary lacking a valid executable
-   guard produces `needs_review`.
-3. `allow` means all applicable deterministic checks passed or a declared
-   exception was explicitly applied. It is not a claim that arbitrary
-   natural language was semantically proven safe.
-4. Every violation cites its boundary id, source location, rule, matched
-   condition, and evidence when available.
+### 5.1 Runtime roles
 
-## 8. Diagnostics (linter)
+Every memory type maps to one of five stable roles:
 
-| Code | Meaning | Severity |
-| --- | --- | --- |
-| `unresolved_symbol` | subject or relation target is not declared | error |
-| `duplicate_declaration_id` | same id declared twice | error |
-| `missing_evidence` | active long-term declaration with no evidence | error |
-| `ambiguous_alias` | alias resolves to multiple entities | warning |
-| `duplicate_declaration` | same kind/subject/scope/claim | warning |
-| `boundary_without_exception` | hard boundary with no exceptions list | warning |
-| `type_force_mismatch` | preference:hard or boundary:advisory | warning |
-| `stale_state` | state expired or undated | warning |
-| `unmarked_supersede_status` | superseded target still marked active | warning |
-| `module_too_large` | module exceeds reading budget | warning |
-| `invalid_guard` | guard is not a nested block | error |
-| `invalid_guard_regex` | executable guard contains an invalid regex | error |
-| `unknown_guard_field` | guard field is not defined by v0.4 | warning |
-| `guard_without_rule` | guard has no deny/require condition | warning |
+| Runtime role | EvidencePack behavior |
+| --- | --- |
+| `symbol` | Enters symbol/alias resolution; excluded from ordinary hits |
+| `constraint` | Surfaces under MUST when applicable |
+| `guidance` | Surfaces under SHOULD |
+| `assertion` | Surfaces under CONTEXT |
+| `question` | Surfaces under MISSING, never as fact |
 
-Diagnostics are first-class product surface — they belong in a maintenance
-UI, not a log file.
+Runtime roles are execution protocol, not a domain ontology. For example,
+`coding.project_rule`, `assistant.commitment`, and `writing.taboo_topic` may
+all compile to `constraint` while retaining different fields and validators.
 
-## 9. Grammar (v0.4)
+### 5.2 Type descriptor
+
+A `TypeDescriptor` defines:
+
+```text
+name
+runtime_role
+required_fields / optional_fields
+claim_fields / search_fields
+capabilities
+defaults
+allowed_forces
+role_field / role_map
+allow_extra_fields
+schema name and version
+```
+
+`role_field` and `role_map` support types whose runtime behavior depends on a
+field. The standard `preference` type, for example, maps `force: strong` to
+`guidance` while advisory preferences remain assertions.
+
+Fields referenced by `claim_fields`, `search_fields`, `defaults`, or
+`role_field` are part of the descriptor's allowed field contract even when
+they are not repeated in `optional_fields`.
+
+### 5.3 Capabilities
+
+Capabilities recognized by the reference runtime include:
+
+| Capability | Effect |
+| --- | --- |
+| `symbol` | Defines canonical symbols and aliases |
+| `searchable` | Eligible for query scoring |
+| `requires_evidence` | Active declarations need evidence |
+| `temporal` | Lifecycle receives staleness checks |
+| `enforceable` | Constraint may enter deterministic compliance |
+| `guardable` | Type may declare a `guard` block |
+| `exceptions_recommended` | Linter asks for explicit exceptions |
+
+Unknown capabilities may be carried for external runtimes. Core behavior is
+only attached to capabilities the runtime understands.
+
+### 5.4 Standard compatibility pack
+
+Pre-v0.5 workspaces continue to load unchanged through
+`memdsl.standard@1`:
+
+| Standard type | Runtime role |
+| --- | --- |
+| `entity` | symbol |
+| `fact`, `decision`, `state`, `goal` | assertion |
+| `preference` | assertion or guidance according to force |
+| `principle` | guidance |
+| `boundary` | constraint |
+| `open_issue` | question |
+
+Other previously reserved standard names also remain generic assertions.
+There is no implicit `User` symbol in v0.5; a workspace must declare every
+subject it references.
+
+## 6. DSL grammar
 
 ```text
 document    := (module_stmt | use_stmt | declaration)*
 module_stmt := 'module' DOTTED_NAME
 use_stmt    := 'use' DOTTED_NAME
-declaration := KIND NAME block
+declaration := TYPE MEMORY_NAME block
 block       := '{' entry* '}'
 entry       := FIELD ':' value | FIELD block
 value       := STRING | ATOM | list
 list        := '[' (value (',' value)*)? ']'
 ```
 
-- Comments: `#` to end of line.
-- Strings: double-quoted, `\n` `\t` `\"` `\\` escapes.
-- ATOM: bare identifiers, dotted symbols (`User.DayJob`), numbers, ISO
-  dates (`2026-06-20`), and call-form scopes (`project("Aurora")`), kept
-  verbatim.
-- Nested blocks (`evidence { ... }`, `relations { ... }`, `guard { ... }`)
-  are single-level maps in v0.4.
+`TYPE` may be a standard name (`boundary`) or a namespaced domain type
+(`coding.project_rule`). Parsing accepts the syntax; linting fails closed if
+no loaded schema defines the type.
 
-## 10. Gated writing and review (v0.3+)
+Nested maps such as `evidence`, `lifecycle`, `access_policy`, `relations`,
+and `guard` are single-level blocks in v0.5.
 
-Writes are not `add_memory()`. The intended pipeline:
+## 7. Querying: EvidencePack
 
-```text
-turn -> candidate extraction -> worth-remembering gate
-     -> kind/force classification -> subject/scope resolution
-     -> compare with existing declarations
-     -> append | merge | supersede | conflict | ignore
-     -> evidence + declaration write -> lint -> compile
-```
-
-The implemented reference path is deliberately narrower than the full
-future pipeline. MCP `memory_propose` accepts exactly one declaration,
-parses it, merges it with the live workspace for fail-closed linting, and
-stages it under `.memdsl/proposals/`. Pending proposals are never loaded by
-`Workspace` or served by `memory_query`.
-
-A person uses `memdsl review list/show/approve/reject`. Approval revalidates
-against the current workspace, atomically replaces the target `.mem` file,
-records an append-only JSONL audit event, and atomically updates proposal
-state. Review decisions are serialized with a cross-process file lock.
-Approval markers and unique audit events make retry recovery idempotent:
-an interrupted approval cannot append the declaration twice.
-
-The worth-remembering gate blocks low-value, ephemeral, evidence-free, or
-boundary-violating content from entering long-term memory. **All**
-LLM-proposed writes still require human review; automation is earned with
-audited gate metrics (false positive rate, wrong kind/force/subject rates),
-not assumed.
-
-## 11. Boundary-compliance evaluation (v0.4)
-
-The JSONL compliance case format records a task, candidate, expected verdict,
-expected applicable boundary ids, expected violations, and optional scope,
-subject, or asserted exceptions. `memdsl eval compliance` runs the same cases
-through four deterministic modes:
+A query returns a layered pack:
 
 ```text
-no_memory       no memory is consulted
-flat_context    lexical boundary hits are flattened into context
-evidence_pack   applicable MUST items are surfaced but not executed
-compliance_gate executable guards produce allow/block/needs_review
+MUST      applicable constraint memories
+SHOULD    guidance memories
+CONTEXT   scored assertion memories
+CONFLICT  declared conflicts among selected memories
+MISSING   question memories and explicit gaps
 ```
 
-The report includes verdict accuracy, unsafe-allow rate, false-block rate,
-MUST recall, citation accuracy, and per-case evidence. This reference suite
-tests the contract and runner reproducibly; it does not claim cross-model
-agent behavior without a separately declared model adapter and run record.
+Layering depends on runtime role, never on a hard-coded domain type name.
+Superseded, retracted, and archived memories do not surface by default.
+Every item carries its id, type, runtime role, capabilities, evidence,
+lifecycle, confidence, and access policy.
 
-## 12. Design principles
+The reference scorer remains lexical plus alias resolution. Retrieval
+backends may be replaced without changing EvidencePack semantics.
 
-- Memory DSL is source code for LLMs to read, not a program to execute.
-- Modules are the LLM's local reading boundary.
-- Types are behavioral contracts, not tags.
-- The symbol table owns naming; aliases resolve, never proliferate.
+## 8. CompliancePack
+
+`memdsl check` and MCP `memory_check` preflight a candidate against
+applicable `constraint` memories.
+
+```text
+verdict                  allow | block | needs_review
+applicable_constraints   constraint memories considered
+violations               failed guards, cited by memory id and type
+asserted_exceptions      exception names supplied by the caller
+exceptions_applied       declared exceptions that actually fired
+unknowns                 constraints that cannot be checked deterministically
+```
+
+Deterministic execution requires both `enforceable` and `guardable`
+capabilities. A constraint without those capabilities remains a MUST item but
+produces `needs_review` rather than being ignored.
+
+Supported guard fields:
+
+| Field | Meaning |
+| --- | --- |
+| `when_any` | Trigger when a phrase occurs in task or candidate |
+| `deny_any` | Violate when a phrase occurs in candidate |
+| `deny_regex` | Violate when a regex matches candidate |
+| `require_any` | Violate unless one phrase occurs in candidate |
+| `require_regex` | Violate unless one regex matches candidate |
+
+`applicable_must` and `boundary_id` remain deprecated JSON aliases for v0.4
+clients. New clients should use generic memory ids and
+`applicable_constraints`.
+
+## 9. Diagnostics
+
+Universal diagnostics include:
+
+| Code | Meaning |
+| --- | --- |
+| `unknown_memory_type` | No loaded schema defines the declaration type |
+| `missing_required_field` | Type schema requires a missing field |
+| `unknown_type_field` | Strict type schema rejects a field |
+| `missing_evidence` | Active evidence-required memory lacks evidence |
+| `unresolved_symbol` | Subject or relation target is unknown |
+| `duplicate_declaration_id` | Stable id is declared twice |
+| `duplicate_declaration` | Type/subject/scope/claim duplicate another memory |
+| `type_force_mismatch` | Force is outside the type descriptor policy |
+| `stale_memory` | Temporal memory is expired, old, or undated |
+| `invalid_guard_regex` | Guard regex is invalid |
+| `invalid_access_policy` | Access policy is not a nested map |
+| `module_too_large` | Module exceeds the reading budget |
+
+The standard compatibility pack may preserve older diagnostic aliases such
+as `boundary_without_exception` and `stale_state`.
+
+## 10. Gated writing and review
+
+MCP `memory_propose` accepts exactly one declaration and validates it against
+the live workspace's `TypeRegistry`. A proposal using an unknown domain type
+or missing a schema-required field fails before staging.
+
+Pending proposals live under `.memdsl/proposals/` and are never served as
+memory. Human approval revalidates against the current schema and workspace,
+atomically updates the target `.mem` file, appends an audit event, and updates
+proposal state. Locks and idempotent markers make interrupted approval safe
+to retry.
+
+## 11. Type discovery surfaces
+
+Loaded types are discoverable through:
+
+```text
+Python       Workspace.registry / TypeRegistry
+CLI          memdsl types <workspace> [--json]
+MCP tool     memory_types
+MCP resource memdsl://types
+```
+
+Agents should inspect loaded types before proposing memory instead of
+inventing a standard taxonomy.
+
+## 12. Compliance evaluation
+
+JSONL compliance cases can reference any type that compiles to
+`constraint`. `memdsl eval compliance` compares:
+
+```text
+no_memory
+flat_context
+evidence_pack
+compliance_gate
+```
+
+Reports include verdict accuracy, unsafe-allow rate, false-block rate,
+constraint recall, citation accuracy, and per-case results. The v0.4
+`boundary_recall` metric remains as a compatibility alias.
+
+## 13. Design principles
+
+- The core owns memory record semantics, not a universal human ontology.
+- Domain types compile to stable runtime roles and capabilities.
+- Users learn their domain vocabulary, not the library author's worldview.
 - Evidence is a source map.
-- Relations are code-level references between memories.
-- The linter gives memory the same maintenance feedback code enjoys.
-- Summaries navigate; they are never facts.
-- Vector search is a fallback tool, not the memory model.
-
----
-
-*This specification distills a longer internal design document (June 2026)
-covering module directories, query planners, shadow evaluation, and
-personhood-synthesis kinds. Those layers are intentionally out of scope
-for v0.4 and will be specified once the core proves useful.*
+- Scope prevents behavioral leakage.
+- Lifecycle and access policy belong to every domain.
+- Unknown types and incompatible schemas fail closed.
+- Standard types are a compatibility pack, not the only allowed worldview.
+- Types are discoverable and versioned.
+- Vector search is a backend, not the memory model.

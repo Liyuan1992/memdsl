@@ -1,0 +1,32 @@
+{
+  "name": "writing",
+  "version": "1",
+  "types": {
+    "voice_preference": {
+      "runtime_role": "guidance",
+      "required_fields": ["claim", "evidence", "scope"],
+      "optional_fields": ["traits", "avoid"],
+      "search_fields": ["traits", "avoid"],
+      "capabilities": ["requires_evidence", "searchable"],
+      "allow_extra_fields": false
+    },
+    "taboo_topic": {
+      "runtime_role": "constraint",
+      "required_fields": ["claim", "evidence", "scope"],
+      "optional_fields": ["audience"],
+      "search_fields": ["audience"],
+      "capabilities": ["requires_evidence", "searchable", "enforceable", "guardable", "exceptions_recommended"],
+      "defaults": {"force": "hard", "status": "active"},
+      "allowed_forces": ["hard"],
+      "allow_extra_fields": false
+    },
+    "style_example": {
+      "runtime_role": "assertion",
+      "required_fields": ["claim", "evidence", "scope", "example"],
+      "optional_fields": ["medium", "traits"],
+      "search_fields": ["example", "medium", "traits"],
+      "capabilities": ["requires_evidence", "searchable"],
+      "allow_extra_fields": false
+    }
+  }
+}

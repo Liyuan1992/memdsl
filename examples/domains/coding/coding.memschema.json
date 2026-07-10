@@ -1,0 +1,32 @@
+{
+  "name": "coding",
+  "version": "1",
+  "types": {
+    "project_rule": {
+      "runtime_role": "constraint",
+      "required_fields": ["claim", "evidence", "scope"],
+      "optional_fields": ["rationale", "owner"],
+      "search_fields": ["rationale", "owner"],
+      "capabilities": ["requires_evidence", "searchable", "enforceable", "guardable", "exceptions_recommended"],
+      "allowed_forces": ["hard"],
+      "defaults": {"force": "hard", "status": "active"},
+      "allow_extra_fields": false
+    },
+    "bug_pattern": {
+      "runtime_role": "assertion",
+      "required_fields": ["claim", "evidence", "scope"],
+      "optional_fields": ["symptoms", "workaround", "fix"],
+      "search_fields": ["symptoms", "workaround", "fix"],
+      "capabilities": ["requires_evidence", "searchable"],
+      "allow_extra_fields": false
+    },
+    "tool_preference": {
+      "runtime_role": "guidance",
+      "required_fields": ["claim", "evidence", "scope"],
+      "optional_fields": ["tool", "reason"],
+      "search_fields": ["tool", "reason"],
+      "capabilities": ["requires_evidence", "searchable"],
+      "allow_extra_fields": false
+    }
+  }
+}

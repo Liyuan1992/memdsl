@@ -1,0 +1,61 @@
+module coding.memory
+
+entity Repository.Memdsl {
+  canonical_name: "memdsl"
+  aliases: ["the repository", "this repo"]
+  status: active
+}
+
+coding.project_rule git.no_force_push {
+  subject: Repository.Memdsl
+  claim: "Never force-push the main branch."
+  scope: repository("memdsl")
+  confidence: high
+  exceptions: []
+  rationale: "Published history must remain auditable."
+  guard {
+    when_any: ["push", "git", "main"]
+    deny_any: ["force-push", "--force", "--force-with-lease"]
+  }
+  access_policy {
+    readers: [developer, coding_agent]
+    writers: [maintainer]
+    reviewers: [maintainer]
+    export: internal
+  }
+  lifecycle {
+    status: active
+  }
+  evidence {
+    source: AGENTS.md
+    quote: "Do not force-push unless the user explicitly asks."
+  }
+}
+
+coding.bug_pattern windows.review_lock {
+  subject: Repository.Memdsl
+  claim: "Concurrent approval can duplicate a declaration without a process lock."
+  scope: component("review")
+  symptoms: ["duplicate approval marker", "duplicate audit event"]
+  fix: "Serialize decisions and make target/audit/status updates idempotent."
+  lifecycle {
+    status: active
+    as_of: 2026-07-10
+  }
+  evidence {
+    source: regression_test
+    quote: "Two concurrent approvals must produce one source marker and one audit event."
+  }
+}
+
+coding.tool_preference search.rg {
+  subject: Repository.Memdsl
+  claim: "Prefer ripgrep for repository text search."
+  scope: repository("memdsl")
+  tool: rg
+  reason: "Fast recursive search with predictable filtering."
+  evidence {
+    source: AGENTS.md
+    quote: "Reach first for rg or rg --files."
+  }
+}

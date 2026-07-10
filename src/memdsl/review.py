@@ -125,7 +125,11 @@ class ReviewStore:
                 f"a proposal must contain exactly one declaration, got {len(doc.declarations)}",
             )])
 
-        merged = Workspace(declarations=list(ws.declarations), files=list(ws.files))
+        merged = Workspace(
+            declarations=list(ws.declarations),
+            files=list(ws.files),
+            registry=ws.registry,
+        )
         merged.add_document(doc)
         decl = merged.declarations[-1]
 

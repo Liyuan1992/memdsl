@@ -1,0 +1,53 @@
+module assistant.memory
+
+entity Person.Owner {
+  canonical_name: "Workspace Owner"
+  aliases: ["owner"]
+  status: active
+}
+
+entity Person.Editor {
+  canonical_name: "Editor"
+  aliases: ["editor"]
+  status: active
+}
+
+assistant.routine weekly.review {
+  subject: Person.Owner
+  claim: "Reserve Friday afternoon for a weekly review."
+  scope: calendar
+  cadence: weekly
+  time_window: friday_afternoon
+  evidence {
+    source: calendar_review
+    quote: "Friday afternoon is the weekly review block."
+  }
+}
+
+assistant.commitment editor.status_update {
+  subject: Person.Owner
+  claim: "Every editor status update must include the current blocker."
+  scope: communication("editor")
+  counterparty: Person.Editor
+  exceptions: []
+  guard {
+    when_any: ["editor", "status update", "weekly update"]
+    require_any: ["blocker", "no blocker"]
+  }
+  evidence {
+    source: meeting_notes
+    quote: "Always tell the editor what is blocked, even when nothing is blocked."
+  }
+}
+
+assistant.relationship_context editor.feedback_style {
+  subject: Person.Editor
+  claim: "The editor prefers concise drafts with decisions highlighted."
+  scope: relationship("Person.Editor")
+  parties: [Person.Owner, Person.Editor]
+  context: "Use a short decision summary before supporting detail."
+  evidence {
+    source: review_notes
+    quote: "Lead with the decision and keep the draft concise."
+  }
+}

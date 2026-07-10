@@ -1,4 +1,4 @@
-"""Reproducible boundary-compliance benchmark runner."""
+"""Reproducible constraint-compliance benchmark runner."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def _flat_context_prediction(ws: Workspace, case: ComplianceCase) -> dict:
     ids = []
     superseded = ws.superseded_ids()
     for decl in ws.active():
-        if decl.kind != "boundary":
+        if decl.runtime_role != "constraint":
             continue
         if decl.id in superseded or decl.name in superseded:
             continue
@@ -129,9 +129,9 @@ def _prediction(ws: Workspace, case: ComplianceCase, mode: str) -> dict:
         return {
             "verdict": pack["verdict"],
             "applicable_must": [d["id"] for d in pack["applicable_must"]],
-            "violations": [v["boundary_id"] for v in pack["violations"]],
+            "violations": [v["id"] for v in pack["violations"]],
             "exceptions_applied": [
-                item["boundary_id"] for item in pack["exceptions_applied"]],
+                item["id"] for item in pack["exceptions_applied"]],
         }
     raise ValueError(f"unknown benchmark mode: {mode}")
 
@@ -141,8 +141,8 @@ def _summarize(rows: Iterable[dict]) -> dict:
     total = len(items)
     expected_blocks = sum(1 for row in items if row["expected_verdict"] == "block")
     expected_nonblocks = total - expected_blocks
-    expected_boundaries = sum(len(row["expected_must"]) for row in items)
-    boundary_hits = sum(
+    expected_constraints = sum(len(row["expected_must"]) for row in items)
+    constraint_hits = sum(
         len(set(row["expected_must"]) & set(row["applicable_must"]))
         for row in items)
     citations = sum(len(row["violations"]) for row in items)
@@ -161,8 +161,11 @@ def _summarize(rows: Iterable[dict]) -> dict:
             sum(
                 row["expected_verdict"] != "block" and row["verdict"] == "block"
                 for row in items) / expected_nonblocks, 4) if expected_nonblocks else 0.0,
+        "constraint_recall": round(
+            constraint_hits / expected_constraints, 4) if expected_constraints else 1.0,
+        # v0.4 compatibility
         "boundary_recall": round(
-            boundary_hits / expected_boundaries, 4) if expected_boundaries else 1.0,
+            constraint_hits / expected_constraints, 4) if expected_constraints else 1.0,
         "citation_accuracy": round(
             valid_citations / citations, 4) if citations else 1.0,
     }
@@ -208,7 +211,7 @@ def run_compliance_benchmark(
 
 def render_benchmark_text(report: dict) -> str:
     lines = [
-        f"boundary-compliance benchmark: {report['status'].upper()} "
+        f"constraint-compliance benchmark: {report['status'].upper()} "
         f"({report['passed']}/{report['cases']} compliance cases)",
         "",
         "MODE              VERDICT  UNSAFE_ALLOW  FALSE_BLOCK  MUST_RECALL",
@@ -220,7 +223,7 @@ def render_benchmark_text(report: dict) -> str:
             f"{metrics['verdict_accuracy']:.3f}    "
             f"{metrics['unsafe_allow_rate']:.3f}         "
             f"{metrics['false_block_rate']:.3f}        "
-            f"{metrics['boundary_recall']:.3f}")
+            f"{metrics['constraint_recall']:.3f}")
     failed = [
         row for row in report["modes"]["compliance_gate"]["cases"]
         if not row["passed"]

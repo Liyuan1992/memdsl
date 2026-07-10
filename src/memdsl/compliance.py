@@ -1,8 +1,8 @@
-"""Deterministic compliance preflight for memdsl hard boundaries.
+"""Deterministic compliance preflight for schema-defined constraints.
 
-The EvidencePack contract makes applicable boundaries visible.  The
+The EvidencePack contract makes applicable constraints visible.  The
 CompliancePack contract takes the next step: it checks a proposed action or
-draft against machine-readable ``guard`` clauses on those boundaries.
+draft against machine-readable ``guard`` clauses on enforceable types.
 
 Natural-language rules without an executable guard are never guessed at by
 the reference implementation.  They produce ``needs_review`` so callers can
@@ -70,7 +70,10 @@ def _terms(text: str) -> set:
 def _decl_dict(decl: Declaration) -> dict:
     result = {
         "id": decl.id,
-        "kind": decl.kind,
+        "type": decl.kind,
+        "kind": decl.kind,  # backward-compatible alias
+        "runtime_role": decl.runtime_role,
+        "capabilities": sorted(decl.capabilities),
         "rule": decl.claim_text,
         "force": decl.force,
         "scope": decl.scope,
@@ -81,6 +84,16 @@ def _decl_dict(decl: Declaration) -> dict:
     if decl.evidence:
         result["evidence"] = decl.evidence
     return result
+
+
+def _ref(decl: Declaration) -> dict:
+    return {
+        "id": decl.id,
+        "type": decl.kind,
+        "runtime_role": decl.runtime_role,
+        # v0.4 compatibility for clients that still read boundary_id.
+        "boundary_id": decl.id,
+    }
 
 
 @dataclass
@@ -106,6 +119,7 @@ class CompliancePack:
             "asserted_exceptions": list(self.asserted_exceptions),
             "verdict": self.verdict,
             "applicable_must": [_decl_dict(d) for d in self.applicable_must],
+            "applicable_constraints": [_decl_dict(d) for d in self.applicable_must],
             "evaluated": list(self.evaluated),
             "violations": list(self.violations),
             "exceptions_applied": list(self.exceptions_applied),
@@ -128,20 +142,20 @@ class CompliancePack:
                 matched = ", ".join(item.get("matched", []))
                 suffix = f" (matched: {matched})" if matched else ""
                 lines.append(
-                    f"- [{item['boundary_id']}] {item['reason']}{suffix}")
+                    f"- [{item['id']}] {item['reason']}{suffix}")
         if self.exceptions_applied:
             lines.extend(["", "EXCEPTIONS APPLIED"])
             for item in self.exceptions_applied:
                 lines.append(
-                    f"- [{item['boundary_id']}] {', '.join(item['exceptions'])}")
+                    f"- [{item['id']}] {', '.join(item['exceptions'])}")
         if self.unknowns:
             lines.extend(["", "NEEDS REVIEW"])
             for item in self.unknowns:
-                lines.append(f"- [{item['boundary_id']}] {item['reason']}")
+                lines.append(f"- [{item['id']}] {item['reason']}")
         return "\n".join(lines)
 
 
-def applicable_boundaries(
+def applicable_constraints(
     ws: Workspace,
     task: str,
     candidate: str = "",
@@ -149,13 +163,13 @@ def applicable_boundaries(
     subject: Optional[str] = None,
     scope: Optional[str] = None,
 ) -> List[Declaration]:
-    """Return hard boundaries relevant to a proposed action.
+    """Return schema-defined constraints relevant to a proposed action.
 
     Compliance applicability is deliberately narrower than EvidencePack
     retrieval.  EvidencePack may fan MUST rules out through a shared subject
     to maximize visibility; an enforcement decision only accepts global
-    boundaries, an explicit subject/scope match, or direct lexical overlap
-    with the boundary itself.  A declaration superseded by another
+    constraints, an explicit subject/scope match, or direct lexical overlap
+    with the memory itself.  A declaration superseded by another
     declaration is excluded even when its status field was not updated yet.
     """
     query = "\n".join(part for part in (task, candidate) if part).strip()
@@ -163,7 +177,7 @@ def applicable_boundaries(
     selected: Dict[str, Declaration] = {}
     superseded = ws.superseded_ids()
     for decl in ws.active():
-        if decl.kind != "boundary" or decl.force not in (None, "hard"):
+        if decl.runtime_role != "constraint":
             continue
         if decl.id in superseded or decl.name in superseded:
             continue
@@ -182,6 +196,19 @@ def applicable_boundaries(
     # Enforcement must not silently drop a rule because a retrieval-style
     # result limit was reached.
     return sorted(selected.values(), key=lambda d: d.id)
+
+
+def applicable_boundaries(
+    ws: Workspace,
+    task: str,
+    candidate: str = "",
+    *,
+    subject: Optional[str] = None,
+    scope: Optional[str] = None,
+) -> List[Declaration]:
+    """Backward-compatible alias for :func:`applicable_constraints`."""
+    return applicable_constraints(
+        ws, task, candidate, subject=subject, scope=scope)
 
 
 def check_compliance(
@@ -206,33 +233,34 @@ def check_compliance(
         scope=str(scope or ""),
         asserted_exceptions=sorted(supplied_exceptions),
     )
-    pack.applicable_must = applicable_boundaries(
+    pack.applicable_must = applicable_constraints(
         ws, task_text, candidate_text, subject=subject, scope=scope)
 
     combined = "\n".join(part for part in (task_text, candidate_text) if part)
     for decl in pack.applicable_must:
+        ref = _ref(decl)
         declared_exceptions = set(_values(decl.fields.get("exceptions")))
         applied = sorted(declared_exceptions & supplied_exceptions)
         guard = decl.fields.get("guard")
         if not isinstance(guard, dict):
             if applied:
                 pack.exceptions_applied.append({
-                    "boundary_id": decl.id,
+                    **ref,
                     "exceptions": applied,
                     "rule": decl.claim_text,
                 })
                 pack.evaluated.append({
-                    "boundary_id": decl.id,
+                    **ref,
                     "status": "exception_applied",
                 })
                 continue
             pack.unknowns.append({
-                "boundary_id": decl.id,
-                "reason": "boundary has no executable guard",
+                **ref,
+                "reason": "constraint has no executable guard",
                 "rule": decl.claim_text,
             })
             pack.evaluated.append({
-                "boundary_id": decl.id,
+                **ref,
                 "status": "needs_review",
             })
             continue
@@ -241,20 +269,35 @@ def check_compliance(
         when_matches = _contains(combined, when_patterns)
         if when_patterns and not when_matches:
             pack.evaluated.append({
-                "boundary_id": decl.id,
+                **ref,
                 "status": "not_triggered",
             })
             continue
 
         if applied:
             pack.exceptions_applied.append({
-                "boundary_id": decl.id,
+                **ref,
                 "exceptions": applied,
                 "rule": decl.claim_text,
             })
             pack.evaluated.append({
-                "boundary_id": decl.id,
+                **ref,
                 "status": "exception_applied",
+            })
+            continue
+
+        if not (decl.has_capability("enforceable")
+                and decl.has_capability("guardable")):
+            pack.unknowns.append({
+                **ref,
+                "reason": (
+                    f"memory type '{decl.kind}' is a constraint but does not "
+                    "declare enforceable + guardable capabilities"),
+                "rule": decl.claim_text,
+            })
+            pack.evaluated.append({
+                **ref,
+                "status": "needs_review",
             })
             continue
 
@@ -267,12 +310,12 @@ def check_compliance(
                     invalid_regex.append(f"{field_name}={pattern!r}: {exc}")
         if invalid_regex:
             pack.unknowns.append({
-                "boundary_id": decl.id,
+                **ref,
                 "reason": "invalid guard regex: " + "; ".join(invalid_regex),
                 "rule": decl.claim_text,
             })
             pack.evaluated.append({
-                "boundary_id": decl.id,
+                **ref,
                 "status": "needs_review",
             })
             continue
@@ -292,12 +335,12 @@ def check_compliance(
         )
         if not actionable:
             pack.unknowns.append({
-                "boundary_id": decl.id,
+                **ref,
                 "reason": "guard has no deny or require condition",
                 "rule": decl.claim_text,
             })
             pack.evaluated.append({
-                "boundary_id": decl.id,
+                **ref,
                 "status": "needs_review",
             })
             continue
@@ -319,7 +362,7 @@ def check_compliance(
 
         if reasons:
             finding = {
-                "boundary_id": decl.id,
+                **ref,
                 "rule": decl.claim_text,
                 "reason": "; ".join(reasons),
                 "matched": sorted(set(matched)),
@@ -330,12 +373,12 @@ def check_compliance(
                 finding["evidence"] = decl.evidence
             pack.violations.append(finding)
             pack.evaluated.append({
-                "boundary_id": decl.id,
+                **ref,
                 "status": "violated",
             })
         else:
             pack.evaluated.append({
-                "boundary_id": decl.id,
+                **ref,
                 "status": "passed",
             })
 

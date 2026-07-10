@@ -97,6 +97,15 @@ def test_status_counts(service):
     assert payload["files"] == 1
     assert payload["declarations"] == 4
     assert payload["kinds"]["boundary"] == 1
+    assert "boundary" in payload["registered_types"]
+
+
+def test_type_registry_is_exposed(service):
+    payload = service.list_types()
+    assert payload["ok"] is True
+    assert payload["schema_version"] == "memdsl.mcp.types.v1"
+    boundary = next(item for item in payload["types"] if item["name"] == "boundary")
+    assert boundary["runtime_role"] == "constraint"
 
 
 def test_query_layers_and_boundary_text(service):

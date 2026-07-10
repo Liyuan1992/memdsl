@@ -1,0 +1,3 @@
+{"id":"project-rule-blocks-force-push","task":"Push the main branch","candidate":"git push --force origin main","scope":"repository(\"memdsl\")","expected_verdict":"block","expected_must":["coding.project_rule:git.no_force_push"],"expected_violations":["coding.project_rule:git.no_force_push"]}
+{"id":"project-rule-allows-normal-push","task":"Push the main branch","candidate":"git push origin main","scope":"repository(\"memdsl\")","expected_verdict":"allow","expected_must":["coding.project_rule:git.no_force_push"],"expected_violations":[]}
+{"id":"unrelated-coding-task","task":"Search the repository for a symbol","candidate":"rg TypeRegistry src","expected_verdict":"allow","expected_must":[],"expected_violations":[]}

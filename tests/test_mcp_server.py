@@ -62,6 +62,7 @@ def test_resources_registered(server):
     resources = asyncio.run(server.list_resources())
     uris = {str(r.uri) for r in resources}
     assert "memdsl://status" in uris
+    assert "memdsl://types" in uris
     assert "memdsl://files" in uris
 
 
@@ -108,6 +109,13 @@ def test_call_memory_check(server):
     assert "boundary:schedule.no_meetings_before_10" in text
 
 
+def test_call_memory_types(server):
+    result = asyncio.run(server.call_tool("memory_types", {}))
+    text = json.dumps(_as_jsonable(result), ensure_ascii=False, default=str)
+    assert "memdsl.mcp.types.v1" in text
+    assert '"name": "boundary"' in text or "boundary" in text
+
+
 def test_read_status_resource(server):
     result = asyncio.run(server.read_resource("memdsl://status"))
     blob = list(result)[0]
@@ -123,6 +131,23 @@ def test_main_inspect(workspace_dir, capsys):
     assert payload["ok"] is True
     assert payload["status"]["declarations"] == 2
     assert payload["lint"]["errors"] == 0
+
+
+def test_main_inspect_fails_closed_on_schema_error(tmp_path, capsys):
+    workspace = tmp_path / "invalid-schema"
+    workspace.mkdir()
+    (workspace / "memdsl.json").write_text(json.dumps({
+        "schema_version": "memdsl.workspace.v9",
+        "schemas": [],
+    }), encoding="utf-8")
+    (workspace / "memory.mem").write_text(
+        'fact x { claim: "x" status: candidate }', encoding="utf-8")
+    code = main(["--inspect", "--workspace", str(workspace)])
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["status"]["status"] == "schema_error"
+    assert payload["lint"]["status"] == "schema_error"
 
 
 def test_main_requires_workspace(monkeypatch, capsys):

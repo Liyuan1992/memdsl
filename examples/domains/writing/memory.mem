@@ -1,0 +1,48 @@
+module writing.memory
+
+entity Publication.TeamBlog {
+  canonical_name: "Team Blog"
+  aliases: ["blog", "publication"]
+  status: active
+}
+
+writing.voice_preference voice.direct {
+  subject: Publication.TeamBlog
+  claim: "Prefer direct language and concrete evidence over promotional adjectives."
+  scope: publication("team_blog")
+  traits: [direct, evidence_first, concise]
+  avoid: ["revolutionary", "game-changing"]
+  evidence {
+    source: editorial_guide
+    quote: "Say what changed, show the evidence, and cut the hype."
+  }
+}
+
+writing.taboo_topic privacy.customer_names {
+  subject: Publication.TeamBlog
+  claim: "Never publish customer names without explicit consent."
+  scope: publication("team_blog")
+  audience: public
+  exceptions: [documented_consent]
+  guard {
+    when_any: ["publish", "blog", "customer story"]
+    deny_any: ["customer name:", "named customer"]
+  }
+  evidence {
+    source: privacy_policy
+    quote: "Customer identities require documented consent before publication."
+  }
+}
+
+writing.style_example release.concise {
+  subject: Publication.TeamBlog
+  claim: "A concise release note states the change, evidence, and impact."
+  scope: publication("team_blog")
+  medium: release_note
+  traits: [concrete, short]
+  example: "Changed: atomic approval. Evidence: concurrent test. Impact: no duplicate writes."
+  evidence {
+    source: approved_draft
+    quote: "Changed: atomic approval. Evidence: concurrent test. Impact: no duplicate writes."
+  }
+}
