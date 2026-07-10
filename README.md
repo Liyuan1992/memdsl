@@ -172,6 +172,9 @@ claim, subject, scope, confidence, lifecycle, access policy, evidence, and
 source location. Domain semantics stay expressive while runtime behavior stays
 predictable.
 
+JSON output is versioned as `memdsl.evidence_pack.v1`; scored CONTEXT entries
+also include `score` and `matched_terms`.
+
 The reference retriever is deliberately lexical. Production systems can put
 BM25, embeddings, graphs, or database indexes behind the same EvidencePack
 contract.
@@ -259,7 +262,9 @@ markers make concurrent or interrupted retries safe.
 - Fictional standard examples for Alex and Mira plus a deliberately broken
   linter workspace.
 
-Full grammar and semantics are in [docs/SPEC.md](docs/SPEC.md).
+Full grammar and semantics are in [docs/SPEC.md](docs/SPEC.md). In-process hosts
+should also read [docs/PUBLIC_API.md](docs/PUBLIC_API.md) and
+[docs/UPGRADING.md](docs/UPGRADING.md).
 
 ### What memdsl is not
 
@@ -458,6 +463,9 @@ MUST
 confidence、lifecycle、access policy、evidence 和源码位置。这样领域语义可以扩展，
 运行时行为仍然稳定。
 
+JSON 输出固定为 `memdsl.evidence_pack.v1`；带分数的 CONTEXT 条目还包含
+`score` 和 `matched_terms`。
+
 参考实现目前使用简单的词法检索。生产系统可以在同一个 EvidencePack 契约后面
 替换成 BM25、embedding、图或数据库索引。
 
@@ -533,7 +541,8 @@ memdsl review reject ~/memory p-20260710-142530-a1b2c3 \
 - 可复现合规 benchmark，以及 coding、assistant、writing 三个领域包。
 - Alex、Mira 两个虚构标准示例和一个故意损坏的 lint 示例。
 
-完整语法与语义见 [docs/SPEC.md](docs/SPEC.md)。
+完整语法与语义见 [docs/SPEC.md](docs/SPEC.md)。进程内宿主还应阅读
+[docs/PUBLIC_API.md](docs/PUBLIC_API.md) 和 [docs/UPGRADING.md](docs/UPGRADING.md)。
 
 ### memdsl 不是什么
 

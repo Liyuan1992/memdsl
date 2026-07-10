@@ -1,6 +1,6 @@
 from memdsl.model import Workspace
 from memdsl.parser import parse_text
-from memdsl.query import build_evidence_pack, explain
+from memdsl.query import EVIDENCE_PACK_SCHEMA, build_evidence_pack, explain
 
 SOURCE = """
 module self
@@ -129,5 +129,7 @@ def test_query_json_roundtrip():
     import json
     pack = build_evidence_pack(make_ws(), "morning schedule")
     data = json.loads(pack.render_json())
+    assert data["schema_version"] == EVIDENCE_PACK_SCHEMA
     assert data["query"] == "morning schedule"
     assert isinstance(data["must"], list)
+    assert all("matched_terms" in item for item in data["context"])

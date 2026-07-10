@@ -353,6 +353,11 @@ Superseded, retracted, and archived memories do not surface by default.
 Every item carries its id, type, runtime role, capabilities, evidence,
 lifecycle, confidence, and access policy.
 
+The stable JSON envelope is `memdsl.evidence_pack.v1`. Every serialized pack
+contains `schema_version`, and scored CONTEXT entries additionally expose
+`score` and `matched_terms`. Hosts may add their own runtime projection fields,
+but must preserve the five layers and declaration ids.
+
 The reference scorer remains lexical plus alias resolution. Retrieval
 backends may be replaced without changing EvidencePack semantics.
 
@@ -421,6 +426,11 @@ memory. Human approval revalidates against the current schema and workspace,
 atomically updates the target `.mem` file, appends an audit event, and updates
 proposal state. Locks and idempotent markers make interrupted approval safe
 to retry.
+
+The supported Python entry points are `ReviewStore`, `Proposal`,
+`ValidationResult`, and `staging_dir_for`, exported from the top-level
+`memdsl` package. Agents may propose; approval remains an explicit host or
+human action.
 
 ## 11. Type discovery surfaces
 
