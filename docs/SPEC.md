@@ -1,7 +1,7 @@
 # Memory DSL Specification
 
-Version: 0.1 (draft)
-Status: reference specification for the `memdsl` v0.1 implementation
+Version: 0.4 (draft)
+Status: reference specification for the `memdsl` v0.4 implementation
 License: [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) — you may share and adapt this document with attribution.
 
 ## 1. Core thesis
@@ -32,13 +32,15 @@ what it SHOULD consider and what is merely context.
 
 ## 2. Non-goals
 
-Version 0.1 deliberately does not attempt:
+Version 0.4 deliberately does not attempt:
 
 - Turing completeness, loops, functions, or runtime computation.
 - Replacing databases, knowledge graphs, or vector stores (they are
   compilation targets and fallbacks, not the source of truth).
 - Turning every conversational utterance into long-term memory.
-- Automatic write pipelines (see §10; writes are reviewed).
+- Fully automatic write approval (see §10; agent writes remain reviewed).
+- Pretending that unstructured natural-language boundaries can be checked
+  deterministically. They fail safely to `needs_review` (see §7.2).
 - Multi-user permission models.
 
 ## 3. File model
@@ -103,7 +105,7 @@ Every declaration answers: what is this memory called, what type is it,
 who is it about, what does it assert, where does it apply, what evidence
 backs it, and how does it relate to other memories.
 
-### 4.1 Kinds (v0.1)
+### 4.1 Kinds (v0.4)
 
 | Kind | Purpose | Typical behavior |
 | --- | --- | --- |
@@ -119,7 +121,7 @@ backs it, and how does it relate to other memories.
 A type is a semantic contract, not a tag. `preference` and `boundary` may
 share a topic, but they bind an agent with completely different strength.
 
-Reserved for future versions (parse but no typed behavior in v0.1):
+Reserved for future versions (parse but no typed behavior in v0.4):
 `goal`, `relationship`, `skill`, `lesson`, `behavior_event`,
 `behavior_pattern`, `habit`, `personhood_signal`, `counter_evidence`,
 `motive_hypothesis`.
@@ -181,6 +183,44 @@ candidate -> active -> stale? -> superseded | retracted | archived
 `state` declarations stale quickly and need `as_of`. `boundary` and
 `principle` should rarely expire but may be superseded or retracted.
 
+### 4.7 Executable boundary guards (v0.4)
+
+A boundary may carry a deterministic `guard` block for preflight checks:
+
+```mem
+boundary privacy.no_family_in_public {
+  subject: User
+  rule: "Never include family details in public-facing content."
+  force: hard
+  scope: global
+  exceptions: [user_explicit_override]
+  status: active
+  guard {
+    when_any: ["public", "blog", "social media"]
+    deny_any: ["family", "wife", "daughter", "son"]
+  }
+  evidence {
+    source: chat
+    quote: "Anything about my family stays out of public posts."
+  }
+}
+```
+
+Supported guard fields:
+
+| Field | Meaning |
+| --- | --- |
+| `when_any` | Activate the guard when any phrase occurs in task or candidate |
+| `deny_any` | Violate when any phrase occurs in the candidate |
+| `deny_regex` | Violate when any case-insensitive regex matches the candidate |
+| `require_any` | Violate unless at least one phrase occurs in the candidate |
+| `require_regex` | Violate unless at least one regex matches the candidate |
+
+String matching is case-insensitive. Regex matching is case-insensitive and
+multiline. A named exception only fires when it appears both in the
+declaration's `exceptions` list and in the caller's explicit exception set.
+Unknown exceptions never waive a boundary.
+
 ## 5. Symbols and aliases
 
 Every long-lived object gets one canonical symbol:
@@ -213,7 +253,9 @@ conflicts.
 Rule of thumb: evidence stays verbatim; declarations are medium-grained;
 threads/summaries navigate; vectors are a fallback.
 
-## 7. Querying: the EvidencePack contract
+## 7. Querying and checking
+
+### 7.1 The EvidencePack contract
 
 A query returns a **layered evidence pack**, not a flat hit list:
 
@@ -241,6 +283,38 @@ implementation uses lexical overlap plus alias resolution; production
 systems should substitute BM25 and/or embeddings *behind the same
 contract*.
 
+### 7.2 The CompliancePack contract (v0.4)
+
+`memdsl check` and MCP `memory_check` preflight a proposed action, answer,
+or draft. They return:
+
+```text
+verdict              allow | block | needs_review
+applicable_must      hard boundaries considered for this action
+violations           failed guard checks, cited by boundary id
+asserted_exceptions   exception names supplied by the caller
+exceptions_applied   declared exceptions explicitly asserted by the caller
+unknowns             applicable rules that cannot be checked deterministically
+```
+
+Compliance applicability is narrower than EvidencePack retrieval. A hard
+boundary is considered when it is global, matches an explicitly supplied
+subject or scope, directly overlaps the task/candidate lexically, or has a
+`when_any` guard trigger present in the task/candidate. The
+checker does not fan enforcement out merely because two declarations share
+a subject.
+
+Verdict rules are fail-safe:
+
+1. Any guard violation produces `block`.
+2. With no violation, any applicable boundary lacking a valid executable
+   guard produces `needs_review`.
+3. `allow` means all applicable deterministic checks passed or a declared
+   exception was explicitly applied. It is not a claim that arbitrary
+   natural language was semantically proven safe.
+4. Every violation cites its boundary id, source location, rule, matched
+   condition, and evidence when available.
+
 ## 8. Diagnostics (linter)
 
 | Code | Meaning | Severity |
@@ -255,11 +329,15 @@ contract*.
 | `stale_state` | state expired or undated | warning |
 | `unmarked_supersede_status` | superseded target still marked active | warning |
 | `module_too_large` | module exceeds reading budget | warning |
+| `invalid_guard` | guard is not a nested block | error |
+| `invalid_guard_regex` | executable guard contains an invalid regex | error |
+| `unknown_guard_field` | guard field is not defined by v0.4 | warning |
+| `guard_without_rule` | guard has no deny/require condition | warning |
 
 Diagnostics are first-class product surface — they belong in a maintenance
 UI, not a log file.
 
-## 9. Grammar (v0.1)
+## 9. Grammar (v0.4)
 
 ```text
 document    := (module_stmt | use_stmt | declaration)*
@@ -277,10 +355,10 @@ list        := '[' (value (',' value)*)? ']'
 - ATOM: bare identifiers, dotted symbols (`User.DayJob`), numbers, ISO
   dates (`2026-06-20`), and call-form scopes (`project("Aurora")`), kept
   verbatim.
-- Nested blocks (`evidence { ... }`, `relations { ... }`) are single-level
-  maps in v0.1.
+- Nested blocks (`evidence { ... }`, `relations { ... }`, `guard { ... }`)
+  are single-level maps in v0.4.
 
-## 10. Writing (informative, not implemented in v0.1)
+## 10. Gated writing and review (v0.3+)
 
 Writes are not `add_memory()`. The intended pipeline:
 
@@ -292,13 +370,45 @@ turn -> candidate extraction -> worth-remembering gate
      -> evidence + declaration write -> lint -> compile
 ```
 
-The worth-remembering gate blocks low-value, ephemeral, evidence-free, or
-boundary-violating content from entering long-term memory. In early
-deployments **all** LLM-proposed writes go to a human review queue;
-automation is earned with audited gate metrics (false positive rate, wrong
-kind/force/subject rates), not assumed.
+The implemented reference path is deliberately narrower than the full
+future pipeline. MCP `memory_propose` accepts exactly one declaration,
+parses it, merges it with the live workspace for fail-closed linting, and
+stages it under `.memdsl/proposals/`. Pending proposals are never loaded by
+`Workspace` or served by `memory_query`.
 
-## 11. Design principles
+A person uses `memdsl review list/show/approve/reject`. Approval revalidates
+against the current workspace, atomically replaces the target `.mem` file,
+records an append-only JSONL audit event, and atomically updates proposal
+state. Review decisions are serialized with a cross-process file lock.
+Approval markers and unique audit events make retry recovery idempotent:
+an interrupted approval cannot append the declaration twice.
+
+The worth-remembering gate blocks low-value, ephemeral, evidence-free, or
+boundary-violating content from entering long-term memory. **All**
+LLM-proposed writes still require human review; automation is earned with
+audited gate metrics (false positive rate, wrong kind/force/subject rates),
+not assumed.
+
+## 11. Boundary-compliance evaluation (v0.4)
+
+The JSONL compliance case format records a task, candidate, expected verdict,
+expected applicable boundary ids, expected violations, and optional scope,
+subject, or asserted exceptions. `memdsl eval compliance` runs the same cases
+through four deterministic modes:
+
+```text
+no_memory       no memory is consulted
+flat_context    lexical boundary hits are flattened into context
+evidence_pack   applicable MUST items are surfaced but not executed
+compliance_gate executable guards produce allow/block/needs_review
+```
+
+The report includes verdict accuracy, unsafe-allow rate, false-block rate,
+MUST recall, citation accuracy, and per-case evidence. This reference suite
+tests the contract and runner reproducibly; it does not claim cross-model
+agent behavior without a separately declared model adapter and run record.
+
+## 12. Design principles
 
 - Memory DSL is source code for LLMs to read, not a program to execute.
 - Modules are the LLM's local reading boundary.
@@ -315,4 +425,4 @@ kind/force/subject rates), not assumed.
 *This specification distills a longer internal design document (June 2026)
 covering module directories, query planners, shadow evaluation, and
 personhood-synthesis kinds. Those layers are intentionally out of scope
-for v0.1 and will be specified once the core proves useful.*
+for v0.4 and will be specified once the core proves useful.*

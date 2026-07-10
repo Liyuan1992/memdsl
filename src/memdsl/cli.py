@@ -2,17 +2,26 @@
 
     memdsl lint PATH...              lint memory source files
     memdsl query PATH... -q TEXT     build an evidence pack for a query
+    memdsl check PATH...             preflight a draft against MUST rules
     memdsl explain PATH... ID        show one declaration with relations
     memdsl review <action> PATH...   human review queue for proposed writes
+    memdsl eval compliance PATH...   run boundary-compliance cases
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from typing import List
 
 from memdsl import __version__
+from memdsl.benchmark import (
+    load_cases,
+    render_benchmark_text,
+    run_compliance_benchmark,
+)
+from memdsl.compliance import check_compliance
 from memdsl.linter import has_errors, lint
 from memdsl.model import Workspace
 from memdsl.parser import ParseError
@@ -57,6 +66,23 @@ def main(argv: List[str] = None) -> int:
     p_explain.add_argument("paths", nargs="+", help=".mem files or directories")
     p_explain.add_argument("id", help="declaration id (kind:name or name)")
 
+    p_check = sub.add_parser(
+        "check", help="preflight a proposed action or draft against MUST rules")
+    p_check.add_argument("paths", nargs="+", help=".mem files or directories")
+    p_check.add_argument("-t", "--task", required=True,
+                         help="task or action being attempted")
+    candidate = p_check.add_mutually_exclusive_group(required=True)
+    candidate.add_argument("-c", "--candidate",
+                           help="candidate action, answer, or draft text")
+    candidate.add_argument("--candidate-file",
+                           help="read candidate text from a UTF-8 file")
+    p_check.add_argument("--subject", help="explicit subject symbol")
+    p_check.add_argument("--scope", help="explicit boundary scope")
+    p_check.add_argument("--exception", action="append", default=[],
+                         dest="exceptions",
+                         help="assert an allowed exception (repeatable)")
+    p_check.add_argument("--json", action="store_true", help="JSON output")
+
     p_review = sub.add_parser(
         "review", help="review queue for proposed writes (human-only)")
     rsub = p_review.add_subparsers(dest="action", required=True)
@@ -89,6 +115,16 @@ def main(argv: List[str] = None) -> int:
     r_reject.add_argument("id", help="proposal id")
     r_reject.add_argument("--reason", default="", help="why it was rejected")
 
+    p_eval = sub.add_parser("eval", help="run reproducible evaluation suites")
+    esub = p_eval.add_subparsers(dest="eval_kind", required=True)
+    e_compliance = esub.add_parser(
+        "compliance", help="run boundary-compliance benchmark cases")
+    e_compliance.add_argument("paths", nargs="+",
+                              help=".mem files or directories")
+    e_compliance.add_argument("--cases", required=True,
+                              help="JSONL compliance case file")
+    e_compliance.add_argument("--json", action="store_true", help="JSON output")
+
     args = parser.parse_args(argv)
 
     if args.command == "lint":
@@ -116,8 +152,42 @@ def main(argv: List[str] = None) -> int:
         print(explain(ws, args.id))
         return 0
 
+    if args.command == "check":
+        ws = _load(args.paths)
+        candidate_text = args.candidate
+        if args.candidate_file:
+            try:
+                with open(args.candidate_file, "r", encoding="utf-8") as handle:
+                    candidate_text = handle.read()
+            except OSError as exc:
+                print(f"cannot read candidate: {exc}", file=sys.stderr)
+                return 2
+        if not str(args.task or "").strip() or not str(candidate_text or "").strip():
+            print("task and candidate must both be non-empty", file=sys.stderr)
+            return 2
+        pack = check_compliance(
+            ws, args.task, candidate_text,
+            subject=args.subject,
+            scope=args.scope,
+            exceptions=args.exceptions,
+        )
+        print(pack.render_json() if args.json else pack.render_text())
+        return {"allow": 0, "block": 1, "needs_review": 2}[pack.verdict]
+
     if args.command == "review":
         return _review(args)
+
+    if args.command == "eval" and args.eval_kind == "compliance":
+        ws = _load(args.paths)
+        try:
+            cases = load_cases(args.cases)
+        except (OSError, ValueError) as exc:
+            print(f"cannot load compliance cases: {exc}", file=sys.stderr)
+            return 2
+        report = run_compliance_benchmark(ws, cases)
+        print(json.dumps(report, indent=2, ensure_ascii=False)
+              if args.json else render_benchmark_text(report))
+        return 0 if report["status"] == "passed" else 1
 
     return 2
 

@@ -4,15 +4,17 @@ A lintable, queryable memory DSL for LLM agents. Memory is written as
 `.mem` source files with named, typed, scoped declarations backed by
 evidence -- then linted like code and queried into layered evidence
 packs (MUST / SHOULD / CONTEXT / CONFLICT / MISSING) that an LLM can
-follow.
+follow. Executable boundary guards can also preflight proposed actions into
+CompliancePacks (ALLOW / BLOCK / NEEDS_REVIEW).
 """
 
 from memdsl.parser import parse_file, parse_text, ParseError
 from memdsl.model import Workspace, Declaration
 from memdsl.linter import lint
 from memdsl.query import build_evidence_pack, EvidencePack
+from memdsl.compliance import check_compliance, CompliancePack
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "parse_file",
@@ -23,5 +25,7 @@ __all__ = [
     "lint",
     "build_evidence_pack",
     "EvidencePack",
+    "check_compliance",
+    "CompliancePack",
     "__version__",
 ]

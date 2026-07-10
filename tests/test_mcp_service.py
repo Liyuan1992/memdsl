@@ -27,6 +27,10 @@ boundary schedule.no_meetings_before_10 {
   scope: global
   exceptions: [emergency]
   status: active
+  guard {
+    when_any: ["meeting", "schedule"]
+    deny_regex: ["\\\\b0?[0-9]:[0-5][0-9]\\\\b"]
+  }
   evidence {
     source: chat
     quote: "Please never book me before ten."
@@ -113,10 +117,27 @@ def test_query_requires_text(service):
     assert payload["status"] == "invalid"
 
 
+def test_check_blocks_candidate_and_requires_both_inputs(service):
+    payload = service.check(
+        "schedule a meeting", "Meeting confirmed at 09:30.")
+    assert payload["ok"] is True
+    assert payload["status"] == "block"
+    pack = payload["compliance_pack"]
+    assert pack["violations"][0]["boundary_id"] == (
+        "boundary:schedule.no_meetings_before_10")
+    assert "BLOCK" in payload["boundary"]
+
+    invalid = service.check("schedule a meeting", "")
+    assert invalid["ok"] is False
+    assert invalid["status"] == "invalid"
+
+
 def test_query_scope_enforced(workspace_dir):
     svc = MemdslMCPService([str(workspace_dir)], scopes="read:summary")
     with pytest.raises(MCPScopeError):
         svc.query("meetings")
+    with pytest.raises(MCPScopeError):
+        svc.check("schedule meeting", "Meeting at 09:30")
     # summary surfaces still work
     assert svc.status()["ok"] is True
 

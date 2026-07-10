@@ -1,0 +1,71 @@
+module compliance_demo
+
+entity User {
+  canonical_name: "Demo User"
+  aliases: ["me", "my"]
+  status: active
+}
+
+boundary privacy.no_family_in_public {
+  subject: User
+  rule: "Never include family details in public-facing content."
+  force: hard
+  scope: global
+  exceptions: [user_explicit_override]
+  status: active
+  guard {
+    when_any: ["public", "blog", "social media"]
+    deny_any: ["family", "wife", "husband", "daughter", "son"]
+  }
+  evidence {
+    source: chat
+    quote: "Anything about my family stays out of public posts."
+  }
+}
+
+boundary schedule.no_meetings_before_10 {
+  subject: User
+  rule: "Never schedule meetings before 10:00."
+  force: hard
+  scope: calendar
+  exceptions: [emergency]
+  status: active
+  guard {
+    when_any: ["meeting", "schedule", "calendar"]
+    deny_regex: ["\\b0?[0-9]:[0-5][0-9]\\b"]
+  }
+  evidence {
+    source: chat
+    quote: "Please never book me before ten."
+  }
+}
+
+boundary publication.ai_disclosure {
+  subject: User
+  rule: "Public AI-assisted content must disclose that assistance."
+  force: hard
+  scope: publication_disclosure
+  exceptions: []
+  status: active
+  guard {
+    when_any: ["publish", "release"]
+    require_any: ["AI-generated", "AI assisted"]
+  }
+  evidence {
+    source: policy
+    quote: "Disclose AI assistance in public releases."
+  }
+}
+
+boundary spending.review_subscriptions {
+  subject: User
+  rule: "Review any new recurring subscription before purchase."
+  force: hard
+  scope: purchase
+  exceptions: []
+  status: active
+  evidence {
+    source: chat
+    quote: "Ask me before adding another subscription."
+  }
+}

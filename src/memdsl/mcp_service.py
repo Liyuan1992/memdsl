@@ -12,7 +12,7 @@ Every payload carries:
 
 Access is gated by scopes (comma-separated in MEMDSL_MCP_SCOPES or passed
 explicitly): "read:summary" for status/list/lint/source, "read:search"
-for query/explain, "write:candidate" for memory_propose. Writes are
+for query/explain/check, "write:candidate" for memory_propose. Writes are
 propose-only and fail-closed: a proposal lands in the review queue
 (`memdsl.review.ReviewStore`) and nothing becomes memory until a human
 approves it with `memdsl review approve`.
@@ -24,6 +24,7 @@ import os
 from typing import List, Optional, Sequence, Union
 
 from memdsl import __version__
+from memdsl.compliance import check_compliance
 from memdsl.linter import lint
 from memdsl.model import Workspace, Declaration
 from memdsl.parser import ParseError
@@ -48,6 +49,7 @@ RESOURCE_URIS = (
 
 TOOL_NAMES = (
     "memory_query",
+    "memory_check",
     "memory_explain",
     "memory_list",
     "memory_lint",
@@ -296,6 +298,63 @@ class MemdslMCPService:
                 "evidence.quote and source anchor this declaration to its origin; "
                 "cite the declaration id, do not paraphrase it as your own inference."
             ),
+        }
+
+    def check(
+        self,
+        task: str,
+        candidate: str,
+        *,
+        subject: Optional[str] = None,
+        scope: Optional[str] = None,
+        exceptions: Optional[Sequence[str]] = None,
+    ) -> dict:
+        """Preflight a proposed action or draft against applicable MUST rules."""
+        self.require_scope(SEARCH_SCOPE)
+        schema = "memdsl.mcp.check.v1"
+        task_text = str(task or "").strip()
+        candidate_text = str(candidate or "").strip()
+        if not task_text or not candidate_text:
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": "invalid",
+                "error": "task_and_candidate_required",
+                "next_actions": [
+                    "Provide both the attempted task and the candidate action or draft.",
+                ],
+            }
+        try:
+            ws = self.workspace()
+        except ParseError as exc:
+            return self._parse_error(schema, exc)
+        pack = check_compliance(
+            ws, task_text, candidate_text,
+            subject=subject or None,
+            scope=scope or None,
+            exceptions=list(exceptions or []),
+        )
+        next_actions = []
+        if pack.verdict == "block":
+            next_actions.append(
+                "Do not use the candidate. Revise it to remove every cited violation, then call memory_check again.")
+        elif pack.verdict == "needs_review":
+            next_actions.append(
+                "Do not assume approval. Route each unknown boundary to a human or semantic evaluator.")
+        else:
+            next_actions.append(
+                "The deterministic guard checks passed; continue to respect the cited MUST declarations.")
+        return {
+            "ok": True,
+            "schema_version": schema,
+            "status": pack.verdict,
+            "compliance_pack": pack.as_dict(),
+            "rendered_text": pack.render_text(),
+            "boundary": (
+                "BLOCK forbids the candidate. NEEDS_REVIEW is not approval: it means "
+                "an applicable natural-language boundary lacks a deterministic guard."
+            ),
+            "next_actions": next_actions,
         }
 
     def list_declarations(

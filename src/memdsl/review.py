@@ -21,7 +21,9 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
+import tempfile
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence
 
@@ -104,6 +106,7 @@ class ReviewStore:
         self.staging_dir = os.path.abspath(staging_dir)
         self.proposals_dir = os.path.join(self.staging_dir, "proposals")
         self.audit_path = os.path.join(self.staging_dir, "audit.log")
+        self.lock_path = os.path.join(self.staging_dir, "review.lock")
 
     # ---- validation ----
 
@@ -148,20 +151,23 @@ class ReviewStore:
                 "errors": result.errors,
                 "warnings": result.warnings,
             }
-        proposal = Proposal(
-            id=_new_id(),
-            status="pending",
-            created_at=_now_iso(),
-            client=_one_line(client),
-            reason=_one_line(reason),
-            source=str(source).strip() + "\n",
-            path="",
-        )
-        os.makedirs(self.proposals_dir, exist_ok=True)
-        proposal.path = os.path.join(self.proposals_dir, proposal.id + PROPOSAL_SUFFIX)
-        _write_proposal(proposal)
-        self._audit("propose", proposal.id, client=proposal.client,
-                    declaration=result.declaration_id, reason=proposal.reason)
+        with _exclusive_file_lock(self.lock_path):
+            proposal = Proposal(
+                id=_new_id(),
+                status="pending",
+                created_at=_now_iso(),
+                client=_one_line(client),
+                reason=_one_line(reason),
+                source=str(source).strip() + "\n",
+                path="",
+            )
+            os.makedirs(self.proposals_dir, exist_ok=True)
+            proposal.path = os.path.join(
+                self.proposals_dir, proposal.id + PROPOSAL_SUFFIX)
+            _write_proposal(proposal)
+            self._audit_once(
+                "propose", proposal.id, client=proposal.client,
+                declaration=result.declaration_id, reason=proposal.reason)
         return {
             "ok": True,
             "status": "pending_review",
@@ -197,61 +203,108 @@ class ReviewStore:
 
     def approve(self, proposal_id: str, ws: Workspace, into: str, *,
                 force: bool = False, by: str = "human") -> dict:
-        proposal = self.get(proposal_id)
-        if proposal is None:
-            return {"ok": False, "status": "not_found", "proposal_id": proposal_id}
-        if proposal.status != "pending":
-            return {"ok": False, "status": f"already_{proposal.status}",
-                    "proposal_id": proposal.id}
-        # Re-validate against the *current* workspace: it may have changed
-        # since the proposal was staged.
-        result = self.validate(ws, proposal.source)
-        if not result.ok and not force:
-            return {
-                "ok": False,
-                "status": "stale_or_invalid",
-                "proposal_id": proposal.id,
-                "errors": result.errors,
-                "warnings": result.warnings,
-                "hint": "fix the workspace or re-propose; --force overrides",
-            }
         into_path = os.path.abspath(into)
-        os.makedirs(os.path.dirname(into_path) or ".", exist_ok=True)
-        stamp = _now_iso()
-        block = (
-            f"\n# approved from proposal {proposal.id} at {stamp}\n"
-            + proposal.source.rstrip("\n") + "\n"
-        )
-        with open(into_path, "a", encoding="utf-8") as f:
-            f.write(block)
-        proposal.status = "approved"
-        proposal.decided_at = stamp
-        proposal.merged_into = into_path
-        _write_proposal(proposal)
-        self._audit("approve", proposal.id, by=by, into=into_path,
-                    declaration=result.declaration_id, forced=bool(force and not result.ok))
-        return {
-            "ok": True,
-            "status": "approved",
-            "proposal_id": proposal.id,
-            "declaration_id": result.declaration_id,
-            "merged_into": into_path,
-            "warnings": result.warnings,
-        }
+        with _exclusive_file_lock(self.lock_path):
+            proposal = self.get(proposal_id)
+            if proposal is None:
+                return {"ok": False, "status": "not_found", "proposal_id": proposal_id}
+            if proposal.status != "pending":
+                return {"ok": False, "status": f"already_{proposal.status}",
+                        "proposal_id": proposal.id}
+
+            prior = self._decision(proposal.id)
+            if prior and prior.get("action") == "reject":
+                proposal.status = "rejected"
+                proposal.decided_at = str(prior.get("ts", ""))
+                proposal.reject_reason = str(prior.get("reason", ""))
+                _write_proposal(proposal)
+                return {"ok": False, "status": "already_rejected",
+                        "proposal_id": proposal.id}
+            if prior and prior.get("action") == "approve" and prior.get("into"):
+                # Recovery must finish the original target, even if a retry
+                # accidentally supplies a different --into path.
+                into_path = os.path.abspath(str(prior["into"]))
+
+            os.makedirs(os.path.dirname(into_path) or ".", exist_ok=True)
+            marker = f"# approved from proposal {proposal.id} at "
+            current = _read_text(into_path)
+            already_merged = marker in current
+
+            # A prior process may have atomically replaced the target and
+            # crashed before persisting proposal status.  The source marker
+            # makes the operation idempotent and lets us finish the decision.
+            if already_merged:
+                declaration_id = _declaration_id(proposal.source)
+                warnings: List[dict] = []
+                forced = False
+                stamp = str((prior or {}).get("ts") or _now_iso())
+            else:
+                # Re-validate against the *current* workspace: it may have
+                # changed since the proposal was staged.
+                result = self.validate(ws, proposal.source)
+                if not result.ok and not force:
+                    return {
+                        "ok": False,
+                        "status": "stale_or_invalid",
+                        "proposal_id": proposal.id,
+                        "errors": result.errors,
+                        "warnings": result.warnings,
+                        "hint": "fix the workspace or re-propose; --force overrides",
+                    }
+                declaration_id = result.declaration_id
+                warnings = result.warnings
+                forced = bool(force and not result.ok)
+                stamp = _now_iso()
+                block = (
+                    f"\n# approved from proposal {proposal.id} at {stamp}\n"
+                    + proposal.source.rstrip("\n") + "\n"
+                )
+                _atomic_write(into_path, current + block)
+
+            # Commit order is target -> audit -> proposal state.  Every stage
+            # is idempotent, so a retry completes an interrupted approval
+            # without duplicating source or audit records.
+            self._audit_once(
+                "approve", proposal.id, by=by, into=into_path,
+                declaration=declaration_id, forced=forced)
+            proposal.status = "approved"
+            proposal.decided_at = stamp
+            proposal.merged_into = into_path
+            _write_proposal(proposal)
+            return {
+                "ok": True,
+                "status": "approved",
+                "proposal_id": proposal.id,
+                "declaration_id": declaration_id,
+                "merged_into": into_path,
+                "warnings": warnings,
+                "recovered": already_merged,
+            }
 
     def reject(self, proposal_id: str, *, reason: str = "", by: str = "human") -> dict:
-        proposal = self.get(proposal_id)
-        if proposal is None:
-            return {"ok": False, "status": "not_found", "proposal_id": proposal_id}
-        if proposal.status != "pending":
-            return {"ok": False, "status": f"already_{proposal.status}",
-                    "proposal_id": proposal.id}
-        proposal.status = "rejected"
-        proposal.decided_at = _now_iso()
-        proposal.reject_reason = _one_line(reason)
-        _write_proposal(proposal)
-        self._audit("reject", proposal.id, by=by, reason=proposal.reject_reason)
-        return {"ok": True, "status": "rejected", "proposal_id": proposal.id}
+        with _exclusive_file_lock(self.lock_path):
+            proposal = self.get(proposal_id)
+            if proposal is None:
+                return {"ok": False, "status": "not_found", "proposal_id": proposal_id}
+            if proposal.status != "pending":
+                return {"ok": False, "status": f"already_{proposal.status}",
+                        "proposal_id": proposal.id}
+            prior = self._decision(proposal.id)
+            if prior and prior.get("action") == "approve":
+                proposal.status = "approved"
+                proposal.decided_at = str(prior.get("ts", ""))
+                proposal.merged_into = str(prior.get("into", ""))
+                _write_proposal(proposal)
+                return {"ok": False, "status": "already_approved",
+                        "proposal_id": proposal.id}
+            proposal.status = "rejected"
+            proposal.decided_at = str((prior or {}).get("ts") or _now_iso())
+            proposal.reject_reason = _one_line(
+                str((prior or {}).get("reason") or reason))
+            self._audit_once(
+                "reject", proposal.id, by=by, reason=proposal.reject_reason)
+            _write_proposal(proposal)
+            return {"ok": True, "status": "rejected", "proposal_id": proposal.id}
 
     # ---- audit ----
 
@@ -261,6 +314,39 @@ class ReviewStore:
         entry.update({k: v for k, v in details.items() if v not in ("", None)})
         with open(self.audit_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+
+    def _audit_once(self, action: str, proposal_id: str, **details) -> None:
+        if any(
+                entry.get("action") == action
+                and entry.get("proposal_id") == proposal_id
+                for entry in self._audit_entries()):
+            return
+        self._audit(action, proposal_id, **details)
+
+    def _audit_entries(self) -> List[dict]:
+        if not os.path.isfile(self.audit_path):
+            return []
+        entries = []
+        try:
+            with open(self.audit_path, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        except OSError:
+            return []
+        return entries
+
+    def _decision(self, proposal_id: str) -> Optional[dict]:
+        decisions = [
+            entry for entry in self._audit_entries()
+            if entry.get("proposal_id") == proposal_id
+            and entry.get("action") in ("approve", "reject")
+        ]
+        return decisions[-1] if decisions else None
 
 
 # ---- proposal file format ----
@@ -284,8 +370,7 @@ def _write_proposal(proposal: Proposal) -> None:
         lines.append(f"# reject_reason: {proposal.reject_reason}")
     lines.append(HEADER_END)
     body = "\n".join(lines) + "\n" + proposal.source
-    with open(proposal.path, "w", encoding="utf-8") as f:
-        f.write(body)
+    _atomic_write(proposal.path, body)
 
 
 def _read_proposal(path: str) -> Optional[Proposal]:
@@ -337,3 +422,70 @@ def _one_line(text: str) -> str:
 
 def _diag(code: str, message: str) -> dict:
     return {"code": code, "severity": "error", "message": message, "line": 0}
+
+
+def _read_text(path: str) -> str:
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return handle.read()
+    except FileNotFoundError:
+        return ""
+
+
+def _declaration_id(source: str) -> str:
+    try:
+        doc = parse_text(source, file=PROPOSAL_FILE_MARKER)
+    except ParseError:
+        return ""
+    if not doc.declarations:
+        return ""
+    decl = doc.declarations[0]
+    return f"{decl.kind}:{decl.name}"
+
+
+def _atomic_write(path: str, text: str) -> None:
+    """Replace one text file atomically and durably on the same filesystem."""
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    os.makedirs(directory, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=".memdsl-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+@contextmanager
+def _exclusive_file_lock(path: str):
+    """Cross-platform process lock for review queue decisions."""
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    os.makedirs(directory, exist_ok=True)
+    handle = open(path, "a+b")
+    try:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()

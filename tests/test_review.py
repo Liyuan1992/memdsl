@@ -2,6 +2,7 @@
 
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -160,6 +161,54 @@ def test_approve_merges_and_audits(store, workspace_dir):
     assert again["status"] == "already_approved"
 
     # audit log carries propose + approve
+    actions = [json.loads(line)["action"]
+               for line in open(store.audit_path, encoding="utf-8")]
+    assert actions == ["propose", "approve"]
+
+
+def test_concurrent_approve_is_idempotent(store, workspace_dir):
+    ws = load_ws(workspace_dir)
+    created = store.create(ws, GOOD_PROPOSAL)
+    pid = created["proposal_id"]
+    into = workspace_dir / "approved.mem"
+
+    def approve_once():
+        return store.approve(pid, ws, str(into))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _n: approve_once(), range(2)))
+
+    assert sum(result["ok"] for result in results) == 1
+    assert into.read_text(encoding="utf-8").count(
+        f"# approved from proposal {pid}") == 1
+    actions = [json.loads(line)["action"]
+               for line in open(store.audit_path, encoding="utf-8")]
+    assert actions == ["propose", "approve"]
+
+
+def test_approve_recovers_after_target_and_audit_commit(store, workspace_dir):
+    ws = load_ws(workspace_dir)
+    created = store.create(ws, GOOD_PROPOSAL)
+    pid = created["proposal_id"]
+    proposal = store.get(pid)
+    into = workspace_dir / "approved.mem"
+    into.write_text(
+        f"# approved from proposal {pid} at 2026-07-10T00:00:00+00:00\n"
+        + proposal.source,
+        encoding="utf-8",
+    )
+    store._audit("approve", pid, into=str(into),
+                 declaration="preference:schedule.mornings_free")
+
+    retry_target = workspace_dir / "wrong-retry-target.mem"
+    result = store.approve(pid, ws, str(retry_target))
+    assert result["ok"] is True
+    assert result["recovered"] is True
+    assert result["merged_into"] == str(into)
+    assert not retry_target.exists()
+    assert store.get(pid).status == "approved"
+    assert into.read_text(encoding="utf-8").count(
+        f"# approved from proposal {pid}") == 1
     actions = [json.loads(line)["action"]
                for line in open(store.audit_path, encoding="utf-8")]
     assert actions == ["propose", "approve"]

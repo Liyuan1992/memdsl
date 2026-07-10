@@ -1,6 +1,6 @@
 """Linter: code-style diagnostics for memory source.
 
-Implements the v0.1 rule set from the spec:
+Implements the v0.4 rule set from the spec:
 
     unresolved_symbol           error    subject/relation target not defined
     ambiguous_alias             warning  alias resolves to multiple entities
@@ -12,6 +12,10 @@ Implements the v0.1 rule set from the spec:
     stale_state                 warning  state past valid_until / as_of too old
     unmarked_supersede_status   warning  superseded target not marked superseded
     module_too_large            warning  module exceeds declaration budget
+    invalid_guard               error    guard is not a nested block
+    invalid_guard_regex         error    guard contains an invalid regex
+    unknown_guard_field         warning  guard field is not defined
+    guard_without_rule          warning  guard has no deny/require condition
 """
 
 from __future__ import annotations
@@ -32,6 +36,9 @@ EVIDENCE_REQUIRED_KINDS = {
 }
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_GUARD_FIELDS = {
+    "when_any", "deny_any", "deny_regex", "require_any", "require_regex",
+}
 
 
 @dataclass
@@ -137,6 +144,41 @@ def lint(ws: Workspace, today: Optional[_dt.date] = None) -> List[Diagnostic]:
                 f"boundary '{d.name}' declares no exceptions; confirm it is "
                 f"truly unconditional or add e.g. [user_explicit_override]",
                 d.file, d.line, d.id))
+
+        # executable compliance guard
+        if d.kind == "boundary" and "guard" in d.fields:
+            guard = d.fields.get("guard")
+            if not isinstance(guard, dict):
+                diags.append(Diagnostic(
+                    "invalid_guard", "error",
+                    f"boundary '{d.name}' guard must be a nested block",
+                    d.file, d.line, d.id))
+            else:
+                unknown = sorted(set(guard) - _GUARD_FIELDS)
+                if unknown:
+                    diags.append(Diagnostic(
+                        "unknown_guard_field", "warning",
+                        f"boundary '{d.name}' guard has unknown field(s): "
+                        f"{', '.join(unknown)}",
+                        d.file, d.line, d.id))
+                if not any(guard.get(key) for key in (
+                        "deny_any", "deny_regex", "require_any", "require_regex")):
+                    diags.append(Diagnostic(
+                        "guard_without_rule", "warning",
+                        f"boundary '{d.name}' guard has no deny or require condition",
+                        d.file, d.line, d.id))
+                for field_name in ("deny_regex", "require_regex"):
+                    raw = guard.get(field_name, [])
+                    patterns = raw if isinstance(raw, list) else [raw]
+                    for pattern in patterns:
+                        try:
+                            re.compile(str(pattern))
+                        except re.error as exc:
+                            diags.append(Diagnostic(
+                                "invalid_guard_regex", "error",
+                                f"boundary '{d.name}' {field_name} pattern "
+                                f"{pattern!r} is invalid: {exc}",
+                                d.file, d.line, d.id))
 
         # type/force mismatch
         if d.kind == "preference" and d.force == "hard":

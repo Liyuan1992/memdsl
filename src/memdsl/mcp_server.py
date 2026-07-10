@@ -31,7 +31,9 @@ SERVER_INSTRUCTIONS = (
     "rules to enforce, SHOULD items are strong preferences, CONTEXT items "
     "are scored candidate facts, CONFLICT items must be surfaced to the "
     "user, and MISSING items are known gaps. Call memory_explain on a "
-    "declaration id before citing it as evidence. Writes are propose-only: "
+    "declaration id before citing it as evidence. Before returning or acting "
+    "on a consequential draft, call memory_check; BLOCK forbids the draft and "
+    "NEEDS_REVIEW is not approval. Writes are propose-only: "
     "memory_propose stages a declaration for human review and nothing "
     "becomes memory until a person approves it with the memdsl review CLI. "
     "Never present a pending proposal as accepted memory."
@@ -78,6 +80,22 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         """Query memory into a layered evidence pack (MUST/SHOULD/CONTEXT/CONFLICT/MISSING)."""
         return svc.query(query, kinds=kinds, subject=subject or None, limit=limit)
 
+    @mcp.tool(name="memory_check")
+    def memory_check(
+        task: str,
+        candidate: str,
+        subject: str = "",
+        scope: str = "",
+        exceptions: Optional[List[str]] = None,
+    ) -> dict:
+        """Preflight a proposed action or draft against applicable MUST boundaries."""
+        return svc.check(
+            task, candidate,
+            subject=subject or None,
+            scope=scope or None,
+            exceptions=exceptions,
+        )
+
     @mcp.tool(name="memory_explain")
     def memory_explain(id: str) -> dict:
         """Show one declaration with its evidence, relations, and reverse references."""
@@ -123,7 +141,8 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
             "items as candidate facts. Surface CONFLICT items to the user "
             "instead of resolving them silently, and state MISSING gaps "
             "rather than guessing. Call memory_explain before citing any "
-            "declaration.\n\n"
+            "declaration. Before returning a consequential draft, call "
+            "memory_check and treat NEEDS_REVIEW as unresolved, not allowed.\n\n"
             f"Task: {task}"
         )
 

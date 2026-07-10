@@ -8,7 +8,7 @@ from typing import Dict, Iterable, List, Optional
 
 from memdsl.parser import Document, RawDeclaration, parse_file
 
-#: Declaration kinds understood by v0.1 typed rules. Other kinds parse
+#: Declaration kinds understood by v0.4 typed rules. Other kinds parse
 #: fine but get no kind-specific behavior.
 CORE_KINDS = {
     "entity", "fact", "preference", "boundary", "principle",

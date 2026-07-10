@@ -27,6 +27,10 @@ boundary schedule.no_meetings_before_10 {
   scope: global
   exceptions: [emergency]
   status: active
+  guard {
+    when_any: ["meeting", "schedule"]
+    deny_regex: ["\\\\b0?[0-9]:[0-5][0-9]\\\\b"]
+  }
   evidence {
     source: chat
     quote: "Please never book me before ten."
@@ -92,6 +96,16 @@ def test_call_memory_query(server):
     text = json.dumps(_as_jsonable(result), ensure_ascii=False, default=str)
     assert "boundary:schedule.no_meetings_before_10" in text
     assert "must" in text
+
+
+def test_call_memory_check(server):
+    result = asyncio.run(server.call_tool(
+        "memory_check",
+        {"task": "schedule a meeting", "candidate": "Meeting at 09:30."},
+    ))
+    text = json.dumps(_as_jsonable(result), ensure_ascii=False, default=str)
+    assert "block" in text
+    assert "boundary:schedule.no_meetings_before_10" in text
 
 
 def test_read_status_resource(server):

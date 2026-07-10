@@ -1,6 +1,6 @@
 """Parser for `.mem` source files.
 
-Grammar (v0.1):
+Grammar (v0.4):
 
     document    := (module_stmt | use_stmt | declaration)*
     module_stmt := 'module' DOTTED_NAME
