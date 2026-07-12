@@ -1,32 +1,56 @@
-name: CI
+name: ci
 
 on:
   push:
-    branches: ["main", "codex/**"]
   pull_request:
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
+  core:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.9", "3.10", "3.11", "3.12"]
-
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
       - name: Install
-        run: python -m pip install -e .[dev]
+        run: python -m pip install -U pip build && python -m pip install -e ".[dev]"
       - name: Compile
         run: python -m compileall -q src tests
       - name: Test
-        run: python -m pytest tests -q
+        run: python -m pytest -q
+      - name: CLI smoke
+        run: |
+          memdsl --version
+          memdsl lint examples/mira
+          memdsl eval compliance examples/compliance --cases examples/compliance/cases.jsonl
       - name: Build and inspect wheel
         run: |
           python -m build
           python -m pip install --force-reinstall dist/*.whl
           python -c "import memdsl; assert memdsl.__version__ == '0.5.0'; assert memdsl.EVIDENCE_PACK_SCHEMA == 'memdsl.evidence_pack.v1'"
+          python -m twine check dist/*
+
+  mcp:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install MCP extra
+        run: python -m pip install -U pip && python -m pip install -e ".[dev,mcp]"
+      - name: Full tests
+        run: python -m pytest -q
+      - name: MCP smoke
+        run: memdsl-mcp --inspect -w examples/alex
