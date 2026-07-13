@@ -27,10 +27,15 @@ from memdsl.mcp_service import MemdslMCPService, TOOL_NAMES
 SERVER_NAME = "memdsl"
 SERVER_INSTRUCTIONS = (
     "memdsl serves agent memory written as .mem source files. Call "
-    "memory_query first and obey the layered contract: MUST items are hard "
-    "constraints to enforce, SHOULD items are guidance, CONTEXT items "
-    "are scored candidate facts, CONFLICT items must be surfaced to the "
-    "user, and MISSING items are known gaps. Call memory_explain on a "
+    "memory_map once at session start so you know what memory exists and "
+    "which vocabulary it uses, then call memory_query with the task's key "
+    "nouns and obey the layered contract: MUST items are hard constraints "
+    "to enforce, SHOULD items are guidance, CONTEXT items are scored "
+    "candidate facts, CONFLICT items must be surfaced to the user, and "
+    "MISSING items are known gaps. A no_match result is a retry signal, not "
+    "proof of absence: check search_trace for filter exclusions, re-query "
+    "with the returned workspace vocabulary, or browse memory_list and the "
+    "raw memdsl://file/{file_id} sources. Call memory_explain on a "
     "declaration id before citing it as evidence. Before returning or acting "
     "on a consequential draft, call memory_check; BLOCK forbids the draft and "
     "NEEDS_REVIEW is not approval. Writes are propose-only: "
@@ -57,6 +62,11 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         """memdsl workspace status: files, memory types, schemas, and scopes."""
         return _json(svc.status())
 
+    @mcp.resource("memdsl://map", mime_type="application/json")
+    def memdsl_map() -> str:
+        """Compact per-module index of all active memory, for session-start context."""
+        return _json(svc.memory_map())
+
     @mcp.resource("memdsl://files", mime_type="application/json")
     def memdsl_files() -> str:
         """List .mem source files with their file ids."""
@@ -74,6 +84,11 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         if not payload.get("ok"):
             return _json(payload)
         return str(payload.get("content", ""))
+
+    @mcp.tool(name="memory_map")
+    def memory_map() -> dict:
+        """Compact index of all active memory (modules, ids, one-line claims, vocabulary). Read once at session start so you know what memory exists before querying."""
+        return svc.memory_map()
 
     @mcp.tool(name="memory_query")
     def memory_query(
@@ -150,14 +165,19 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
     def memdsl_task_brief(task: str = "") -> str:
         """Brief an agent on how to use memdsl memory for a task."""
         return (
-            "Before acting, call memory_query with the task's key nouns. "
-            "Treat MUST items as constraints you enforce even when they seem "
-            "irrelevant, SHOULD items as guidance, and CONTEXT "
-            "items as candidate facts. Surface CONFLICT items to the user "
-            "instead of resolving them silently, and state MISSING gaps "
-            "rather than guessing. Call memory_explain before citing any "
-            "declaration. Before returning a consequential draft, call "
-            "memory_check and treat NEEDS_REVIEW as unresolved, not allowed.\n\n"
+            "Start by calling memory_map so you know what memory exists and "
+            "which vocabulary it uses. Then call memory_query with the "
+            "task's key nouns. Treat MUST items as constraints you enforce "
+            "even when they seem irrelevant, SHOULD items as guidance, and "
+            "CONTEXT items as candidate facts. Surface CONFLICT items to the "
+            "user instead of resolving them silently, and state MISSING gaps "
+            "rather than guessing. If a query returns no_match, do not "
+            "conclude the memory is absent: check search_trace for filter "
+            "exclusions, re-query with the returned vocabulary, or browse "
+            "memory_list and the raw sources. Call memory_explain before "
+            "citing any declaration. Before returning a consequential draft, "
+            "call memory_check and treat NEEDS_REVIEW as unresolved, not "
+            "allowed.\n\n"
             f"Task: {task}"
         )
 

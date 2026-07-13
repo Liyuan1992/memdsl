@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.1 - 2026-07-13
+
+- Added agent navigation surfaces: `memdsl map` CLI command, `memory_map`
+  MCP tool, `memdsl://map` resource, and `build_memory_map` /
+  `render_memory_map_text` / `workspace_vocabulary` Python exports.
+- EvidencePack JSON additively exposes `search_trace` (query interpretation,
+  applied filters, and matches a type/subject filter excluded).
+- `memory_query` no-match responses now return the workspace vocabulary and
+  adaptive retry guidance instead of a static browse hint; filter-hidden
+  matches are reported under MISSING rather than failing silently.
+
 ## 0.5.0 - 2026-07-10
 
 - Added schema-extensible domain types and stable runtime roles.

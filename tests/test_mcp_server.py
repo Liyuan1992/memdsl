@@ -62,6 +62,7 @@ def test_resources_registered(server):
     resources = asyncio.run(server.list_resources())
     uris = {str(r.uri) for r in resources}
     assert "memdsl://status" in uris
+    assert "memdsl://map" in uris
     assert "memdsl://types" in uris
     assert "memdsl://files" in uris
 

@@ -126,6 +126,83 @@ def test_query_requires_text(service):
     assert payload["status"] == "invalid"
 
 
+NARROW_SCOPE_SOURCE = """\
+module work
+
+entity Repo {
+  kind: Repository
+  canonical_name: "memdsl"
+  aliases: ["the repo"]
+  status: active
+}
+
+boundary git.no_force_push {
+  subject: Repo
+  rule: "Never force-push the main branch."
+  force: hard
+  scope: repository
+  exceptions: []
+  status: active
+  evidence {
+    source: chat
+    quote: "Never force-push main."
+  }
+}
+"""
+
+
+def _narrow_service(tmp_path):
+    path = tmp_path / "narrow"
+    path.mkdir()
+    (path / "work.mem").write_text(NARROW_SCOPE_SOURCE, encoding="utf-8")
+    return MemdslMCPService([str(path)])
+
+
+def test_query_no_match_returns_vocabulary_guidance(tmp_path):
+    svc = _narrow_service(tmp_path)
+    payload = svc.query("weekend hiking plans")
+    assert payload["ok"] is True
+    assert payload["status"] == "no_match"
+    vocab = payload["vocabulary"]
+    assert vocab["subjects"][0]["symbol"] == "Repo"
+    assert "repository" in vocab["scopes"]
+    assert "boundary" in vocab["types"]
+    assert payload["evidence_pack"]["search_trace"]["hits"] == 0
+    assert any("vocabulary" in action for action in payload["next_actions"])
+
+
+def test_query_filter_exclusion_is_reported_not_silent(tmp_path):
+    svc = _narrow_service(tmp_path)
+    payload = svc.query("force push main branch", types=["preference"])
+    assert payload["status"] == "no_match"
+    trace = payload["evidence_pack"]["search_trace"]
+    assert trace["excluded_by_filters_total"] == 1
+    assert trace["excluded_by_filters"][0]["id"] == "boundary:git.no_force_push"
+    assert any("excluded by your types/subject filter" in action
+               for action in payload["next_actions"])
+
+
+def test_memory_map_payload(service):
+    payload = service.memory_map()
+    assert payload["ok"] is True
+    assert payload["schema_version"] == "memdsl.mcp.map.v1"
+    assert payload["declarations"] == 4
+    module = payload["modules"][0]
+    assert module["module"] == "self"
+    ids = [item["id"] for item in module["items"]]
+    assert "entity:User" in ids
+    assert "boundary:schedule.no_meetings_before_10" in ids
+    assert "[boundary:schedule.no_meetings_before_10]" in payload["rendered_text"]
+    assert payload["vocabulary"]["subjects"][0]["symbol"] == "User"
+    assert payload["boundary"]
+
+
+def test_memory_map_scope_enforced(workspace_dir):
+    svc = MemdslMCPService([str(workspace_dir)], scopes="read:search")
+    with pytest.raises(MCPScopeError):
+        svc.memory_map()
+
+
 def test_check_blocks_candidate_and_requires_both_inputs(service):
     payload = service.check(
         "schedule a meeting", "Meeting confirmed at 09:30.")

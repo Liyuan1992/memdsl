@@ -51,6 +51,11 @@ class EvidencePack:
     conflicts: List[Tuple[Declaration, str]] = field(default_factory=list)
     missing: List[str] = field(default_factory=list)
     resolved_subjects: List[str] = field(default_factory=list)
+    # Diagnostic retrieval trace (additive to memdsl.evidence_pack.v1): how
+    # the query was interpreted and what the filters excluded, so an agent
+    # that misses can correct course instead of concluding the memory is
+    # absent.
+    trace: Dict = field(default_factory=dict)
 
     # ---- rendering ----
 
@@ -130,6 +135,7 @@ class EvidencePack:
             "conflicts": [{"id": d.id, "conflicts_with": t}
                           for d, t in self.conflicts],
             "missing": self.missing,
+            "search_trace": self.trace,
         }
 
     def render_json(self) -> str:
@@ -175,18 +181,32 @@ def build_evidence_pack(
 
     superseded = ws.superseded_ids()
     type_filter = types if types is not None else kinds
-    candidates = [
+    pool = [
         d for d in ws.active()
         if d.runtime_role != "symbol"
         and d.has_capability("searchable")
         and d.id not in superseded and d.name not in superseded
-        and (type_filter is None or d.kind in type_filter)
+    ]
+    candidates = [
+        d for d in pool
+        if (type_filter is None or d.kind in type_filter)
         and (subject is None or d.subject == subject)
     ]
 
     scored = [_score(d, query_terms, subject_hits) for d in candidates]
     hits = sorted([s for s in scored if s.score > 0],
                   key=lambda s: -s.score)[:limit]
+
+    # Filters must fail loud: score what they excluded so a miss can say
+    # "the memory exists, your filter hid it" instead of a silent no-match.
+    excluded_matches: List[ScoredDeclaration] = []
+    if len(candidates) != len(pool):
+        candidate_ids = {d.id for d in candidates}
+        excluded_matches = sorted(
+            [s for s in (_score(d, query_terms, subject_hits)
+                         for d in pool if d.id not in candidate_ids)
+             if s.score > 0],
+            key=lambda s: -s.score)
     hit_ids = {s.declaration.id for s in hits}
     hit_subjects = {s.declaration.subject for s in hits if s.declaration.subject}
     hit_scopes = {s.declaration.scope for s in hits if s.declaration.scope}
@@ -240,6 +260,10 @@ def build_evidence_pack(
     # MISSING: explicit gaps
     if not hits:
         pack.missing.append(f"no declarations matched query terms: {query_terms}")
+    if excluded_matches and not hits:
+        pack.missing.append(
+            f"{len(excluded_matches)} declaration(s) matched the query but "
+            "were excluded by type/subject filters")
     if subject and not any(d.subject == subject for d in selected):
         pack.missing.append(f"no declarations found for subject '{subject}'")
     for s in scored:
@@ -247,7 +271,151 @@ def build_evidence_pack(
             pack.missing.append(
                 f"question [{s.declaration.id}]: {s.declaration.claim_text}")
 
+    pack.trace = {
+        "query_terms": query_terms,
+        "matched_aliases": {alias: sorted(set(symbols))
+                            for alias, symbols in amap.items()
+                            if alias in lowered},
+        "filters": {
+            "types": list(type_filter) if type_filter is not None else None,
+            "subject": subject,
+        },
+        "candidates_considered": len(candidates),
+        "hits": len(hits),
+        "excluded_by_filters_total": len(excluded_matches),
+        "excluded_by_filters": [
+            {"id": s.declaration.id,
+             "type": s.declaration.kind,
+             "subject": s.declaration.subject,
+             "matched_terms": sorted(s.matched_terms)}
+            for s in excluded_matches[:5]
+        ],
+    }
+
     return pack
+
+
+def workspace_vocabulary(ws: Workspace, limit: int = 50) -> dict:
+    """The words a workspace speaks: subjects, aliases, scopes, types, modules.
+
+    A no-match answer is only useful if the agent learns which vocabulary to
+    re-ask in; this is that vocabulary, computed from the active declarations.
+    """
+    active = ws.active()
+    subjects = []
+    for d in active:
+        if d.runtime_role != "symbol":
+            continue
+        entry: dict = {"symbol": d.name}
+        canonical = d.fields.get("canonical_name")
+        if isinstance(canonical, str) and canonical:
+            entry["canonical_name"] = canonical
+        aliases = d.fields.get("aliases")
+        if isinstance(aliases, list) and aliases:
+            entry["aliases"] = [str(a) for a in aliases]
+        subjects.append(entry)
+    types: Dict[str, int] = {}
+    for d in active:
+        types[d.kind] = types.get(d.kind, 0) + 1
+    return {
+        "subjects": subjects[:limit],
+        "scopes": sorted({d.scope for d in active if d.scope})[:limit],
+        "modules": sorted({d.module for d in active if d.module})[:limit],
+        "types": dict(sorted(types.items())),
+    }
+
+
+def build_memory_map(ws: Workspace, claim_chars: int = 120) -> dict:
+    """Compact per-module index of every active declaration.
+
+    Designed to sit in an agent's context from turn one -- the agent knows
+    what memory exists before it queries, instead of discovering the
+    workspace only through retrieval misses. Claims are truncated and carry
+    no evidence: the map is for navigation, not citation.
+    """
+    superseded = ws.superseded_ids()
+    modules: Dict[str, List[dict]] = {}
+    total = 0
+    for d in ws.active():
+        if d.id in superseded or d.name in superseded:
+            continue
+        entry: dict = {"id": d.id, "type": d.kind,
+                       "runtime_role": d.runtime_role}
+        if d.subject:
+            entry["subject"] = d.subject
+        if d.scope:
+            entry["scope"] = d.scope
+        if d.runtime_role == "symbol":
+            parts = []
+            canonical = d.fields.get("canonical_name")
+            if isinstance(canonical, str) and canonical:
+                parts.append(f'"{canonical}"')
+            aliases = d.fields.get("aliases")
+            if isinstance(aliases, list) and aliases:
+                parts.append("aliases: " + ", ".join(str(a) for a in aliases))
+            entry["summary"] = "; ".join(parts)
+        else:
+            entry["summary"] = _clip(d.claim_text, claim_chars)
+        modules.setdefault(d.module or "", []).append(entry)
+        total += 1
+    return {
+        "declarations": total,
+        "modules": [
+            {"module": name or "(none)", "declarations": len(items),
+             "items": items}
+            for name, items in sorted(modules.items())
+        ],
+        "vocabulary": workspace_vocabulary(ws),
+    }
+
+
+def render_memory_map_text(map_data: dict) -> str:
+    """Render a memory map as a compact text index for context residence."""
+    lines = [
+        f"# memory map: {map_data['declarations']} declaration(s) "
+        f"in {len(map_data['modules'])} module(s)"
+    ]
+    for mod in map_data["modules"]:
+        lines.append("")
+        lines.append(f"## module {mod['module']}")
+        for item in mod["items"]:
+            head = f"- [{item['id']}] {item['runtime_role']}"
+            details = []
+            if item.get("subject"):
+                details.append(f"subject {item['subject']}")
+            if item.get("scope"):
+                details.append(f"scope {item['scope']}")
+            if details:
+                head += " (" + ", ".join(details) + ")"
+            if item.get("summary"):
+                head += f": {item['summary']}"
+            lines.append(head)
+    vocab = map_data.get("vocabulary", {})
+    if vocab:
+        lines.append("")
+        lines.append("## vocabulary")
+        subject_bits = []
+        for s in vocab.get("subjects", []):
+            bit = s["symbol"]
+            names = [s.get("canonical_name", "")] + list(s.get("aliases", []))
+            names = [n for n in dict.fromkeys(names) if n]
+            if names:
+                bit += " (aka " + ", ".join(names) + ")"
+            subject_bits.append(bit)
+        if subject_bits:
+            lines.append("subjects: " + "; ".join(subject_bits))
+        if vocab.get("scopes"):
+            lines.append("scopes: " + ", ".join(vocab["scopes"]))
+        if vocab.get("types"):
+            lines.append("types: " + ", ".join(
+                f"{name}({count})" for name, count in vocab["types"].items()))
+    return "\n".join(lines)
+
+
+def _clip(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1] + "…"
 
 
 def explain(ws: Workspace, decl_id: str) -> str:

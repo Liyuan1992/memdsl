@@ -12,8 +12,11 @@ from memdsl import (
     ValidationResult,
     Workspace,
     build_evidence_pack,
+    build_memory_map,
     lint,
+    render_memory_map_text,
     staging_dir_for,
+    workspace_vocabulary,
 )
 ```
 
@@ -30,6 +33,25 @@ assert payload["schema_version"] == "memdsl.evidence_pack.v1"
 The five layers are stable: `must`, `should`, `context`, `conflicts`, and
 `missing`. Domain type names are not hard-coded into the query executor;
 `runtime_role` controls layering.
+
+Serialized packs additively expose `search_trace` (query interpretation,
+applied filters, and matches a filter excluded) so a miss carries enough
+information to retry instead of looking like absence.
+
+## Navigation path
+
+```python
+from memdsl import build_memory_map, render_memory_map_text, workspace_vocabulary
+
+map_data = build_memory_map(workspace)     # per-module index + vocabulary
+text = render_memory_map_text(map_data)    # compact context-resident form
+vocab = workspace_vocabulary(workspace)    # subjects/aliases/scopes/types
+```
+
+The map is a navigation projection for agents that read memory themselves:
+items carry no evidence and claims are truncated, so it is never a citation
+source. Hosts should load it (or `memdsl map <workspace>` / MCP
+`memory_map`) at session start.
 
 ## Reviewed write path
 
