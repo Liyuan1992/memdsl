@@ -78,6 +78,8 @@ def _decl_dict(decl: Declaration) -> dict:
         "force": decl.force,
         "scope": decl.scope,
         "subject": decl.subject,
+        "status": decl.status,
+        "lifecycle": decl.lifecycle,
         "file": decl.file,
         "line": decl.line,
     }
@@ -91,6 +93,8 @@ def _ref(decl: Declaration) -> dict:
         "id": decl.id,
         "type": decl.kind,
         "runtime_role": decl.runtime_role,
+        "status": decl.status,
+        "lifecycle": decl.lifecycle,
         # v0.4 compatibility for clients that still read boundary_id.
         "boundary_id": decl.id,
     }
@@ -133,7 +137,13 @@ class CompliancePack:
         lines = [f"VERDICT: {self.verdict.upper()}", "", "APPLICABLE MUST"]
         if self.applicable_must:
             for decl in self.applicable_must:
-                lines.append(f"- [{decl.id}] {decl.claim_text}")
+                lifecycle = json.dumps(
+                    decl.lifecycle, ensure_ascii=False, sort_keys=True,
+                    separators=(",", ":"))
+                lines.append(
+                    f"- [{decl.id}] {decl.claim_text} "
+                    f"[status={decl.status}; runtime_role={decl.runtime_role}; "
+                    f"lifecycle={lifecycle}]")
         else:
             lines.append("- (none)")
         if self.violations:
@@ -177,7 +187,7 @@ def applicable_constraints(
     selected: Dict[str, Declaration] = {}
     superseded = ws.superseded_ids()
     for decl in ws.active():
-        if decl.runtime_role != "constraint":
+        if decl.runtime_role != "constraint" or decl.status != "active":
             continue
         if decl.id in superseded or decl.name in superseded:
             continue

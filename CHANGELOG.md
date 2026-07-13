@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.6.0 - 2026-07-14
+
+- Kept the dependency-free core on Python 3.9+ while marking the optional
+  `mcp>=1.2` dependency for Python 3.10+; MCP CI remains on Python 3.12.
+- Added lifecycle-safe PROVISIONAL query results while keeping
+  `memdsl.evidence_pack.v1` additive: only active declarations enter
+  MUST/SHOULD/CONTEXT/MISSING, candidate aliases cannot redirect queries, and
+  candidate constraints no longer participate in compliance.
+- Added strict `memdsl.policy.v1` review policies, explicit
+  `auto_approvable` type capability, host-owned `ProposalContext`, and the
+  exact-quote `workspace_file_quote` evidence verifier.
+- Added `ReviewStore.submit` with default-safe queueing, shadow
+  `eligible_route`, normalized-content no-op detection, deterministic
+  sampling, finite daily limits, workspace reload/fingerprints, bounded
+  automatic targets, and never-force automatic approval.
+- Added append-only route assessment snapshots, strict audit reading,
+  post-review confirm/flag events, replayable digest/stats, and route metadata
+  on review list/show.
+- Added `memdsl review policy init/show/validate`, `review digest`,
+  `review stats`, and `review audit`. Policy initialization writes a valid
+  disabled JSON template with no comments.
+- Updated MCP proposing to `memdsl.mcp.propose.v2` and added non-default
+  `write:auto`; configured invalid policy now fails explicitly instead of
+  silently queueing.
+- Defined append-only correction: promotion, revision, and retraction use a
+  new human-reviewed declaration with `supersedes` and optional
+  `revision_of`. ReviewStore does not depend on Git commits.
+
 ## 0.5.1 - 2026-07-13
 
 - Added agent navigation surfaces: `memdsl map` CLI command, `memory_map`

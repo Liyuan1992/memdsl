@@ -2,7 +2,7 @@
 
 The reference executor is deliberately simple: lowercase term overlap
 plus alias resolution, with typed layering on top. It demonstrates the
-*contract* (query in, MUST/SHOULD/CONTEXT/CONFLICT/MISSING out) --
+*contract* (query in, MUST/SHOULD/CONTEXT/PROVISIONAL/CONFLICT/MISSING out) --
 production systems should plug in a real retrieval backend (BM25,
 embeddings, or both) behind the same contract.
 """
@@ -42,6 +42,16 @@ class ScoredDeclaration:
     matched_terms: List[str] = field(default_factory=list)
 
 
+def _render_lifecycle(d: Declaration) -> str:
+    """Make a declaration's authority level unambiguous in text output."""
+    lifecycle = json.dumps(
+        d.lifecycle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return (
+        f" [status={d.status}; runtime_role={d.runtime_role}; "
+        f"lifecycle={lifecycle}]"
+    )
+
+
 @dataclass
 class EvidencePack:
     query: str
@@ -56,6 +66,11 @@ class EvidencePack:
     # that misses can correct course instead of concluding the memory is
     # absent.
     trace: Dict = field(default_factory=dict)
+    # Additive to memdsl.evidence_pack.v1 and deliberately appended after the
+    # original positional fields. Declarations that remain serviceable but
+    # are not active (normally lifecycle.status=candidate) are visible here
+    # without acquiring normative or factual authority.
+    provisional: List[ScoredDeclaration] = field(default_factory=list)
 
     # ---- rendering ----
 
@@ -68,14 +83,15 @@ class EvidencePack:
             for d in self.must:
                 lines.append(f"- [{d.id}] {d.claim_text}"
                              + (f" (exceptions: {d.fields['exceptions']})"
-                                if "exceptions" in d.fields else ""))
+                                if "exceptions" in d.fields else "")
+                             + _render_lifecycle(d))
         else:
             lines.append("- (no constraints apply)")
         lines.append("")
         lines.append("SHOULD")
         if self.should:
             for d in self.should:
-                lines.append(f"- [{d.id}] {d.claim_text}")
+                lines.append(f"- [{d.id}] {d.claim_text}{_render_lifecycle(d)}")
         else:
             lines.append("- (none)")
         lines.append("")
@@ -86,14 +102,26 @@ class EvidencePack:
                 extra = ""
                 if d.has_capability("temporal") and d.lifecycle.get("as_of"):
                     extra = f" (as_of {d.lifecycle['as_of']})"
-                lines.append(f"- [{d.id}] {d.claim_text}{extra}")
+                lines.append(
+                    f"- [{d.id}] {d.claim_text}{extra}{_render_lifecycle(d)}")
+        else:
+            lines.append("- (none)")
+        lines.append("")
+        lines.append("PROVISIONAL")
+        if self.provisional:
+            for s in self.provisional:
+                d = s.declaration
+                lines.append(
+                    f"- [{d.id}] {d.claim_text}{_render_lifecycle(d)}")
         else:
             lines.append("- (none)")
         if self.conflicts:
             lines.append("")
             lines.append("CONFLICT")
             for d, target in self.conflicts:
-                lines.append(f"- [{d.id}] conflicts_with [{target}]")
+                lines.append(
+                    f"- [{d.id}] conflicts_with [{target}]"
+                    f"{_render_lifecycle(d)}")
         if self.missing:
             lines.append("")
             lines.append("MISSING")
@@ -132,7 +160,15 @@ class EvidencePack:
                             matched_terms=list(s.matched_terms),
                         )
                         for s in self.context],
-            "conflicts": [{"id": d.id, "conflicts_with": t}
+            "provisional": [dict(
+                                decl(s.declaration),
+                                score=round(s.score, 3),
+                                matched_terms=list(s.matched_terms),
+                            )
+                            for s in self.provisional],
+            "conflicts": [{"id": d.id, "conflicts_with": t,
+                           "runtime_role": d.runtime_role,
+                           "status": d.status, "lifecycle": d.lifecycle}
                           for d, t in self.conflicts],
             "missing": self.missing,
             "search_trace": self.trace,
@@ -146,7 +182,9 @@ def _score(decl: Declaration, query_terms: List[str],
            subject_hits: List[str]) -> ScoredDeclaration:
     hay = decl.searchable_text()
     hay_terms = set(_terms(hay))
-    matched = [t for t in set(query_terms) if t in hay_terms]
+    # Preserve query order while de-duplicating terms.  Iterating a set here
+    # made the serialized matched_terms order depend on Python's hash seed.
+    matched = [t for t in dict.fromkeys(query_terms) if t in hay_terms]
     score = float(len(matched))
     if decl.subject and decl.subject in subject_hits:
         score += 2.0
@@ -154,6 +192,40 @@ def _score(decl: Declaration, query_terms: List[str],
     if score > 0 and str(decl.confidence or "") == "high":
         score += 0.25
     return ScoredDeclaration(decl, score, matched)
+
+
+def _scored_sort_key(scored: ScoredDeclaration) -> tuple:
+    """Stable ranking key shared by active and provisional retrieval."""
+    declaration = scored.declaration
+    return (
+        -scored.score,
+        declaration.id,
+        declaration.file,
+        declaration.line,
+    )
+
+
+def _active_alias_map(ws: Workspace) -> Dict[str, List[str]]:
+    """Aliases trusted for query routing and MUST relevance.
+
+    Candidate symbols remain visible in the memory map, but must not redirect
+    a query or activate constraints before human confirmation. Keep this
+    filter local so the older Workspace.alias_map() API retains its behavior.
+    """
+    superseded = ws.superseded_ids()
+    amap: Dict[str, List[str]] = {}
+    for decl in ws.active():
+        if (decl.runtime_role != "symbol"
+                or decl.status != "active"
+                or decl.id in superseded
+                or decl.name in superseded):
+            continue
+        aliases = decl.fields.get("aliases", [])
+        if not isinstance(aliases, list):
+            continue
+        for alias in aliases:
+            amap.setdefault(str(alias).lower(), []).append(decl.name)
+    return amap
 
 
 def build_evidence_pack(
@@ -169,7 +241,7 @@ def build_evidence_pack(
     query_terms = _terms(query)
 
     # alias resolution: map query words/phrases to canonical symbols
-    amap = ws.alias_map()
+    amap = _active_alias_map(ws)
     subject_hits: List[str] = []
     lowered = query.lower()
     for alias, symbols in amap.items():
@@ -194,8 +266,26 @@ def build_evidence_pack(
     ]
 
     scored = [_score(d, query_terms, subject_hits) for d in candidates]
-    hits = sorted([s for s in scored if s.score > 0],
-                  key=lambda s: -s.score)[:limit]
+    matched = [s for s in scored if s.score > 0]
+
+    # Authority lanes must be ranked and limited independently.  Otherwise a
+    # high-scoring candidate can consume the shared result budget, displacing
+    # an active hit and indirectly changing MUST/SHOULD/CONTEXT/CONFLICT.
+    # Provisional memory remains bounded, but never competes with active
+    # authority for its result slots.
+    result_limit = max(0, limit)
+    active_hits = sorted(
+        (s for s in matched if s.declaration.status == "active"),
+        key=_scored_sort_key,
+    )[:result_limit]
+    provisional_hits = sorted(
+        (s for s in matched if s.declaration.status != "active"),
+        key=_scored_sort_key,
+    )[:result_limit]
+    pack.provisional.extend(provisional_hits)
+    # MISSING is an authoritative lane too.  Provisional matches may be shown
+    # as leads, but they cannot suppress an active-memory gap.
+    has_active_hits = bool(active_hits)
 
     # Filters must fail loud: score what they excluded so a miss can say
     # "the memory exists, your filter hid it" instead of a silent no-match.
@@ -206,15 +296,19 @@ def build_evidence_pack(
             [s for s in (_score(d, query_terms, subject_hits)
                          for d in pool if d.id not in candidate_ids)
              if s.score > 0],
-            key=lambda s: -s.score)
-    hit_ids = {s.declaration.id for s in hits}
-    hit_subjects = {s.declaration.subject for s in hits if s.declaration.subject}
-    hit_scopes = {s.declaration.scope for s in hits if s.declaration.scope}
+            key=_scored_sort_key)
+    # Provisional matches are informative only: they must not fan out through
+    # a shared subject or scope and thereby activate an authoritative MUST.
+    hit_ids = {s.declaration.id for s in active_hits}
+    hit_subjects = {
+        s.declaration.subject for s in active_hits if s.declaration.subject}
+    hit_scopes = {
+        s.declaration.scope for s in active_hits if s.declaration.scope}
 
     # MUST: constraints that matched, share subject/scope with hits, or are
     # global. Domain types reach this layer through runtime_role.
     for d in ws.active():
-        if d.runtime_role != "constraint":
+        if d.runtime_role != "constraint" or d.status != "active":
             continue
         if d.id in superseded or d.name in superseded:
             continue
@@ -230,7 +324,7 @@ def build_evidence_pack(
     must_ids = {d.id for d in pack.must}
 
     # SHOULD: any domain type compiled to the guidance runtime role
-    for s in hits:
+    for s in active_hits:
         d = s.declaration
         if d.id in must_ids:
             continue
@@ -241,7 +335,7 @@ def build_evidence_pack(
 
     # CONTEXT: assertions among the remaining hits. Questions never become
     # facts; custom types reach MISSING through the question runtime role.
-    for s in hits:
+    for s in active_hits:
         d = s.declaration
         if d.id in must_ids or d.id in should_ids:
             continue
@@ -258,18 +352,28 @@ def build_evidence_pack(
                 pack.conflicts.append((d, target))
 
     # MISSING: explicit gaps
-    if not hits:
-        pack.missing.append(f"no declarations matched query terms: {query_terms}")
-    if excluded_matches and not hits:
+    if not has_active_hits:
         pack.missing.append(
-            f"{len(excluded_matches)} declaration(s) matched the query but "
+            f"no active declarations matched query terms: {query_terms}")
+    excluded_active_matches = [
+        item for item in excluded_matches
+        if item.declaration.status == "active"
+    ]
+    if excluded_active_matches and not has_active_hits:
+        pack.missing.append(
+            f"{len(excluded_active_matches)} active declaration(s) matched "
+            "the query but "
             "were excluded by type/subject filters")
     if subject and not any(d.subject == subject for d in selected):
-        pack.missing.append(f"no declarations found for subject '{subject}'")
+        pack.missing.append(
+            f"no active declarations found for subject '{subject}'")
     for s in scored:
-        if s.declaration.runtime_role == "question" and s.score > 0:
+        if (s.declaration.status == "active"
+                and s.declaration.runtime_role == "question"
+                and s.score > 0):
+            d = s.declaration
             pack.missing.append(
-                f"question [{s.declaration.id}]: {s.declaration.claim_text}")
+                f"question [{d.id}]: {d.claim_text}{_render_lifecycle(d)}")
 
     pack.trace = {
         "query_terms": query_terms,
@@ -281,7 +385,7 @@ def build_evidence_pack(
             "subject": subject,
         },
         "candidates_considered": len(candidates),
-        "hits": len(hits),
+        "hits": len(active_hits) + len(provisional_hits),
         "excluded_by_filters_total": len(excluded_matches),
         "excluded_by_filters": [
             {"id": s.declaration.id,
@@ -299,7 +403,7 @@ def workspace_vocabulary(ws: Workspace, limit: int = 50) -> dict:
     """The words a workspace speaks: subjects, aliases, scopes, types, modules.
 
     A no-match answer is only useful if the agent learns which vocabulary to
-    re-ask in; this is that vocabulary, computed from the active declarations.
+    re-ask in; this is that vocabulary, computed from serviceable declarations.
     """
     active = ws.active()
     subjects = []
@@ -326,12 +430,13 @@ def workspace_vocabulary(ws: Workspace, limit: int = 50) -> dict:
 
 
 def build_memory_map(ws: Workspace, claim_chars: int = 120) -> dict:
-    """Compact per-module index of every active declaration.
+    """Compact per-module index of every serviceable declaration.
 
     Designed to sit in an agent's context from turn one -- the agent knows
     what memory exists before it queries, instead of discovering the
-    workspace only through retrieval misses. Claims are truncated and carry
-    no evidence: the map is for navigation, not citation.
+    workspace only through retrieval misses. Candidate status is explicit so
+    provisional memory cannot masquerade as active authority. Claims are
+    truncated and carry no evidence: the map is for navigation, not citation.
     """
     superseded = ws.superseded_ids()
     modules: Dict[str, List[dict]] = {}
@@ -340,7 +445,9 @@ def build_memory_map(ws: Workspace, claim_chars: int = 120) -> dict:
         if d.id in superseded or d.name in superseded:
             continue
         entry: dict = {"id": d.id, "type": d.kind,
-                       "runtime_role": d.runtime_role}
+                       "runtime_role": d.runtime_role,
+                       "status": d.status,
+                       "lifecycle": d.lifecycle}
         if d.subject:
             entry["subject"] = d.subject
         if d.scope:
@@ -379,7 +486,15 @@ def render_memory_map_text(map_data: dict) -> str:
         lines.append("")
         lines.append(f"## module {mod['module']}")
         for item in mod["items"]:
-            head = f"- [{item['id']}] {item['runtime_role']}"
+            status = item.get("status", "active")
+            lifecycle = item.get("lifecycle", {"status": status})
+            lifecycle_text = json.dumps(
+                lifecycle, ensure_ascii=False, sort_keys=True,
+                separators=(",", ":"))
+            head = (
+                f"- [{item['id']}] {item['runtime_role']} "
+                f"[status={status}; lifecycle={lifecycle_text}]"
+            )
             details = []
             if item.get("subject"):
                 details.append(f"subject {item['subject']}")

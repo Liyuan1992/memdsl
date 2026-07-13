@@ -1,5 +1,6 @@
 """Tests for the SDK-free MCP service layer."""
 
+import json
 import os
 
 import pytest
@@ -9,6 +10,7 @@ from memdsl.mcp_service import (
     MemdslMCPService,
     parse_scopes,
 )
+from memdsl.policy import EvidenceVerification, ProposalContext
 
 MEM_SOURCE = """\
 module self
@@ -347,3 +349,348 @@ def test_files_and_read_file(service, workspace_dir):
     missing = service.read_file("42")
     assert missing["ok"] is False
     assert missing["status"] == "not_found"
+
+
+def _policy_workspace(
+    tmp_path,
+    *,
+    auto_approvable=True,
+    sample_percent=0,
+    daily_limit=5,
+    verifier="workspace_file_quote",
+):
+    path = tmp_path / "policy-memory"
+    path.mkdir()
+    (path / "memdsl.json").write_text(json.dumps({
+        "schema_version": "memdsl.workspace.v1",
+        "schemas": ["example.memschema.json"],
+    }), encoding="utf-8")
+    (path / "example.memschema.json").write_text(json.dumps({
+        "name": "example",
+        "version": "1",
+        "types": {
+            "observation": {
+                "runtime_role": "assertion",
+                "required_fields": ["claim", "scope", "evidence"],
+                "capabilities": [
+                    "requires_evidence",
+                    "searchable",
+                    *(["auto_approvable"] if auto_approvable else []),
+                ],
+                "allow_extra_fields": False,
+            },
+        },
+    }), encoding="utf-8")
+    (path / "base.mem").write_text("module observations\n", encoding="utf-8")
+    (path / "evidence.txt").write_text(
+        "The fictional build is green.\n", encoding="utf-8")
+    staging = path / ".memdsl"
+    staging.mkdir()
+    policy = {
+        "version": "memdsl.policy.v1",
+        "default_route": "queue",
+        "auto_merge_into": "generated/observations.mem",
+        "sample_to_queue_percent": sample_percent,
+        "max_auto_approve_per_day": daily_limit,
+        "trusted_clients": ["mcp:fictional-collector"],
+        "rules": [{
+            "name": "verified-observations",
+            "route": "auto_approve",
+            "match": {
+                "kind": ["example.observation"],
+                "scope": ["project:fictional"],
+                "client": ["mcp:fictional-collector"],
+                "evidence_verifier": [verifier],
+            },
+        }],
+    }
+    (staging / "policy.json").write_text(
+        json.dumps(policy, indent=2), encoding="utf-8")
+    source = (
+        "example.observation build.green {\n"
+        "  claim: \"The fictional build is green.\"\n"
+        "  scope: \"project:fictional\"\n"
+        "  lifecycle { status: candidate }\n"
+        "  evidence {\n"
+        "    source: evidence.txt\n"
+        "    quote: \"The fictional build is green.\"\n"
+        "  }\n"
+        "}\n"
+    )
+    return path, source
+
+
+def test_policy_auto_approve_is_provisional_and_idempotent(tmp_path):
+    workspace, source = _policy_workspace(tmp_path)
+    service = MemdslMCPService(
+        [str(workspace)],
+        scopes="read:summary,read:search,write:candidate,write:auto",
+        client_name="mcp:fictional-collector",
+    )
+
+    result = service.propose(source)
+    assert result["ok"] is True
+    assert result["schema_version"] == "memdsl.mcp.propose.v2"
+    assert result["route"] == "auto_approved"
+    assert result["status"] == "auto_approved"
+    assert result["assessment_hash"]
+    assert result["merged_into"].endswith("generated\\observations.mem") or (
+        result["merged_into"].endswith("generated/observations.mem"))
+
+    query = service.query("fictional build green")
+    assert query["status"] == "ok"
+    pack = query["evidence_pack"]
+    assert [item["id"] for item in pack["provisional"]] == [
+        "example.observation:build.green"]
+    assert pack["must"] == []
+    assert pack["should"] == []
+    assert pack["context"] == []
+
+    duplicate = service.propose(source)
+    assert duplicate["route"] == "no_op"
+    assert duplicate["duplicate_of"] == result["proposal_id"]
+
+    status = service.status()
+    assert status["automation_effective"] is True
+    assert status["auto_approvals_today"] == 1
+    assert status["unaudited_auto_approvals"] == 1
+
+
+def test_policy_shadow_routes_to_queue_but_reports_eligibility(tmp_path):
+    workspace, source = _policy_workspace(tmp_path)
+    service = MemdslMCPService(
+        [str(workspace)],
+        scopes="read:summary,read:search,write:candidate",
+        client_name="mcp:fictional-collector",
+    )
+    result = service.propose(source)
+    assert result["route"] == "queued"
+    assert result["status"] == "pending_review"
+    assert result["eligible_route"] == "auto_approve"
+    assert "write_auto_not_granted" in result["reason_codes"]
+    assert not (workspace / "generated" / "observations.mem").exists()
+
+
+def test_invalid_policy_fails_before_staging_even_without_auto_scope(tmp_path):
+    workspace, source = _policy_workspace(tmp_path)
+    policy_path = workspace / ".memdsl" / "policy.json"
+    policy_path.write_text('{"version":"memdsl.policy.v1","unknown":true}',
+                           encoding="utf-8")
+    service = MemdslMCPService([str(workspace)])
+    result = service.propose(source)
+    assert result["ok"] is False
+    assert result["status"] == "policy_invalid"
+    proposals = workspace / ".memdsl" / "proposals"
+    assert not proposals.exists() or not list(proposals.iterdir())
+
+
+def test_in_process_host_can_inject_context_factory_and_custom_verifier(tmp_path):
+    workspace, source = _policy_workspace(tmp_path, verifier="host_fixture")
+    context_clients = []
+    verifier_calls = []
+
+    def context_factory(client_id):
+        context_clients.append(client_id)
+        return ProposalContext(client_id=client_id)
+
+    def host_verifier(evidence, workspace_paths):
+        verifier_calls.append((evidence, tuple(workspace_paths)))
+        return EvidenceVerification.verified_content(
+            verifier="host_fixture",
+            evidence=evidence,
+            source_content="host-authenticated synthetic evidence",
+        )
+
+    service = MemdslMCPService(
+        [str(workspace)],
+        scopes="read:summary,read:search,write:candidate,write:auto",
+        client_name="mcp:fictional-collector",
+        context_factory=context_factory,
+        evidence_verifier=host_verifier,
+    )
+    result = service.propose(source)
+
+    assert result["route"] == "auto_approved"
+    assert context_clients == ["mcp:fictional-collector"]
+    assert len(verifier_calls) == 2
+    assert verifier_calls[0][0]["quote"] == "The fictional build is green."
+    assert verifier_calls[0][1] == (str(workspace),)
+    assert verifier_calls[1] == verifier_calls[0]
+
+
+def test_custom_verifier_exception_on_locked_recheck_falls_back(tmp_path):
+    workspace, source = _policy_workspace(tmp_path, verifier="host_fixture")
+    verifier_calls = []
+
+    def host_verifier(evidence, workspace_paths):
+        verifier_calls.append((evidence, tuple(workspace_paths)))
+        if len(verifier_calls) == 2:
+            raise RuntimeError("synthetic second-pass failure")
+        return EvidenceVerification.verified_content(
+            verifier="host_fixture",
+            evidence=evidence,
+            source_content="stable first-pass source",
+        )
+
+    service = MemdslMCPService(
+        [str(workspace)],
+        scopes="read:summary,read:search,write:candidate,write:auto",
+        client_name="mcp:fictional-collector",
+        evidence_verifier=host_verifier,
+    )
+
+    result = service.propose(source)
+
+    assert len(verifier_calls) == 2
+    assert result["route"] == "queued"
+    assert result["approval_error"]["status"] == "evidence_changed"
+    assert result["approval_error"]["reason"] == "evidence_verifier_exception"
+    assert not (workspace / "generated" / "observations.mem").exists()
+
+
+def test_custom_verifier_digest_change_on_locked_recheck_falls_back(tmp_path):
+    workspace, source = _policy_workspace(tmp_path, verifier="host_fixture")
+    verifier_calls = []
+
+    def host_verifier(evidence, workspace_paths):
+        verifier_calls.append((evidence, tuple(workspace_paths)))
+        source_content = (
+            "first source containing The fictional build is green."
+            if len(verifier_calls) == 1
+            else "changed source containing The fictional build is green."
+        )
+        return EvidenceVerification.verified_content(
+            verifier="host_fixture",
+            evidence=evidence,
+            source_content=source_content,
+        )
+
+    service = MemdslMCPService(
+        [str(workspace)],
+        scopes="read:summary,read:search,write:candidate,write:auto",
+        client_name="mcp:fictional-collector",
+        evidence_verifier=host_verifier,
+    )
+
+    result = service.propose(source)
+
+    assert len(verifier_calls) == 2
+    assert result["route"] == "queued"
+    assert result["approval_error"]["status"] == "evidence_changed"
+    assert not (workspace / "generated" / "observations.mem").exists()
+
+
+def test_unverified_evidence_is_queued(tmp_path):
+    workspace, source = _policy_workspace(tmp_path)
+    (workspace / "evidence.txt").write_text(
+        "This file does not contain the proposal quote.\n", encoding="utf-8")
+    service = MemdslMCPService(
+        [str(workspace)],
+        scopes="read:summary,read:search,write:candidate,write:auto",
+        client_name="mcp:fictional-collector",
+    )
+
+    result = service.propose(source)
+
+    assert result["route"] == "queued"
+    assert "evidence_not_verified" in result["reason_codes"]
+    assert not (workspace / "generated" / "observations.mem").exists()
+
+
+def test_verifier_exception_becomes_unverified_and_queues(tmp_path):
+    workspace, source = _policy_workspace(tmp_path, verifier="exploding_verifier")
+
+    def exploding_verifier(_evidence, _workspace_paths):
+        raise RuntimeError("synthetic verifier failure")
+
+    service = MemdslMCPService(
+        [str(workspace)],
+        scopes="read:summary,read:search,write:candidate,write:auto",
+        client_name="mcp:fictional-collector",
+        evidence_verifier=exploding_verifier,
+    )
+
+    result = service.propose(source)
+
+    assert result["route"] == "queued"
+    assert "evidence_not_verified" in result["reason_codes"]
+    assert not (workspace / "generated" / "observations.mem").exists()
+
+
+def test_missing_verifier_is_unverified_and_queues(tmp_path):
+    workspace, source = _policy_workspace(tmp_path)
+    service = MemdslMCPService(
+        [str(workspace)],
+        scopes="read:summary,read:search,write:candidate,write:auto",
+        client_name="mcp:fictional-collector",
+        evidence_verifier=None,
+    )
+
+    result = service.propose(source)
+
+    assert result["route"] == "queued"
+    assert "evidence_not_verified" in result["reason_codes"]
+    assert service.status()["automation_effective"] is False
+
+
+def test_status_uses_quota_reservation_when_auto_approval_falls_back(
+    tmp_path, monkeypatch,
+):
+    workspace, source = _policy_workspace(tmp_path, daily_limit=1)
+    service = MemdslMCPService(
+        [str(workspace)],
+        scopes="read:summary,read:search,write:candidate,write:auto",
+        client_name="mcp:fictional-collector",
+    )
+    monkeypatch.setattr(
+        service.review_store,
+        "approve",
+        lambda *_args, **_kwargs: {"ok": False, "status": "workspace_changed"},
+    )
+
+    result = service.propose(source)
+    status = service.status()
+
+    assert result["route"] == "queued"
+    assert result["rule"].startswith("fallback:")
+    assert status["auto_approvals_today"] == 1
+    assert status["automation_effective"] is False
+
+
+def test_status_disables_automation_when_every_candidate_is_sampled(tmp_path):
+    workspace, source = _policy_workspace(tmp_path, sample_percent=100)
+    service = MemdslMCPService(
+        [str(workspace)],
+        scopes="read:summary,read:search,write:candidate,write:auto",
+        client_name="mcp:fictional-collector",
+    )
+
+    assert service.status()["automation_effective"] is False
+    result = service.propose(source)
+    assert result["route"] == "queued"
+    assert "sampled_to_queue" in result["reason_codes"]
+
+
+def test_status_disables_automation_without_auto_approvable_type(tmp_path):
+    workspace, source = _policy_workspace(tmp_path, auto_approvable=False)
+    service = MemdslMCPService(
+        [str(workspace)],
+        scopes="read:summary,read:search,write:candidate,write:auto",
+        client_name="mcp:fictional-collector",
+    )
+
+    assert service.status()["automation_effective"] is False
+    result = service.propose(source)
+    assert result["route"] == "queued"
+    assert "type_not_auto_approvable" in result["reason_codes"]
+
+
+def test_status_disables_automation_for_current_untrusted_client(tmp_path):
+    workspace, _source = _policy_workspace(tmp_path)
+    service = MemdslMCPService(
+        [str(workspace)],
+        scopes="read:summary,read:search,write:candidate,write:auto",
+        client_name="mcp:untrusted",
+    )
+
+    assert service.status()["automation_effective"] is False

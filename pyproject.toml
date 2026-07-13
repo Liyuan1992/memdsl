@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memdsl"
-version = "0.5.1"
+version = "0.6.0"
 description = "Schema-extensible agent memory as lintable, queryable source code"
 readme = "README.md"
 license = { text = "MIT" }
@@ -29,7 +29,7 @@ memdsl-mcp = "memdsl.mcp_server:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "build>=1.2", "twine>=5.0"]
-mcp = ["mcp>=1.2"]
+mcp = ["mcp>=1.2; python_version >= '3.10'"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/memdsl"]

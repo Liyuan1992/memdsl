@@ -1,7 +1,8 @@
 # Memory DSL Specification
 
-Version: 0.5 (draft)
-Status: reference specification for the `memdsl` v0.5 implementation
+Version: 0.6
+Status: reference specification for the `memdsl` v0.6 implementation
+Release date: 2026-07-14
 License: [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
 
 ## 1. Core thesis
@@ -11,7 +12,8 @@ long-term memory. Memory gets stable ids, evidence, scope, confidence,
 lifecycle, access policy, relations, diagnostics, and behavioral roles so an
 agent can read memory the way it reads code.
 
-Version 0.5 separates two layers that earlier versions mixed together:
+Version 0.6 retains the two-layer type architecture introduced in 0.5 and
+adds lifecycle-safe provisional serving plus host-attested, risk-tiered review:
 
 ```text
 core memory record     claim / evidence / scope / confidence / lifecycle /
@@ -29,14 +31,24 @@ Domain types compile to a small stable set of **runtime roles**. Runtime roles
 tell query and compliance how to behave; domain types tell users what a
 memory means in their own field.
 
+### 1.1 Python compatibility
+
+The dependency-free core library and `memdsl` CLI support Python 3.9 and
+newer. The optional MCP SDK dependency, `mcp>=1.2`, requires Python 3.10 or
+newer; therefore the `mcp` extra is guarded by a
+`python_version >= "3.10"` dependency marker and `memdsl-mcp` is a
+Python 3.10+ surface. Python 3.9 deployments are core-only.
+
 ## 2. Non-goals
 
-Version 0.5 deliberately does not attempt:
+Version 0.6 deliberately does not attempt:
 
 - Turing completeness, loops, functions, or arbitrary runtime computation.
 - Replacing databases, vector stores, or knowledge graphs.
 - Defining one correct ontology for all people and domains.
-- Fully automatic write approval; agent writes remain human-reviewed.
+- Unrestricted automatic writing. Only explicitly opted-in, narrowly scoped
+  candidate assertions may be policy-approved; every uncertain or
+  higher-impact write remains queued for a person.
 - Identity-provider integration or complete multi-tenant authorization.
   Access policy is represented, validated, and transported, while external
   runtimes remain responsible for binding identities to it.
@@ -169,7 +181,8 @@ evidence {
 ```
 
 Types with the `requires_evidence` capability fail lint when an active
-declaration lacks evidence. Candidate memories may remain unconfirmed.
+declaration lacks evidence. Candidate memories may remain unconfirmed, but
+query can expose them only under PROVISIONAL.
 
 ### 4.2 Scope
 
@@ -195,12 +208,12 @@ confidence policies behind the same record contract.
 
 ### 4.4 Lifecycle
 
-Preferred v0.5 form:
+Preferred v0.6 form:
 
 ```mem
 lifecycle {
   status: active
-  as_of: 2026-07-10
+  as_of: 2026-07-14
   valid_until: 2026-12-31
 }
 ```
@@ -210,6 +223,12 @@ and `archived`. For backward compatibility, top-level `status`, `as_of`, and
 `valid_until` still compile into the same lifecycle record.
 
 Types with the `temporal` capability receive staleness diagnostics.
+
+Lifecycle status is an authority boundary. Only `active` declarations may
+enter MUST, SHOULD, CONTEXT, MISSING, alias resolution, or deterministic
+compliance. A non-active declaration that remains serviceable and searchable
+may appear only under PROVISIONAL. In particular, a candidate constraint is
+never an enforceable MUST rule.
 
 ### 4.5 Access policy
 
@@ -222,7 +241,7 @@ access_policy {
 }
 ```
 
-v0.5 validates and exposes access policy through Python, JSON, CLI, and MCP.
+v0.6 validates and exposes access policy through Python, JSON, CLI, and MCP.
 The reference runtime does not claim to authenticate these identities; an
 embedding application must bind its principals to the policy.
 
@@ -246,11 +265,11 @@ Every memory type maps to one of five stable roles:
 
 | Runtime role | EvidencePack behavior |
 | --- | --- |
-| `symbol` | Enters symbol/alias resolution; excluded from ordinary hits |
-| `constraint` | Surfaces under MUST when applicable |
-| `guidance` | Surfaces under SHOULD |
-| `assertion` | Surfaces under CONTEXT |
-| `question` | Surfaces under MISSING, never as fact |
+| `symbol` | Active declarations enter symbol/alias resolution; excluded from ordinary hits |
+| `constraint` | Active declarations surface under MUST when applicable |
+| `guidance` | Active declarations surface under SHOULD |
+| `assertion` | Active declarations surface under CONTEXT |
+| `question` | Active declarations surface under MISSING, never as fact |
 
 Runtime roles are execution protocol, not a domain ontology. For example,
 `coding.project_rule`, `assistant.commitment`, and `writing.taboo_topic` may
@@ -294,9 +313,15 @@ Capabilities recognized by the reference runtime include:
 | `enforceable` | Constraint may enter deterministic compliance |
 | `guardable` | Type may declare a `guard` block |
 | `exceptions_recommended` | Linter asks for explicit exceptions |
+| `auto_approvable` | Type explicitly permits policy consideration; the v0.6 safety floor still restricts automatic approval to candidate assertions |
 
 Unknown capabilities may be carried for external runtimes. Core behavior is
 only attached to capabilities the runtime understands.
+
+No standard compatibility type is automatically trusted merely because of
+its name. A workspace schema must explicitly add `auto_approvable`, and a
+review policy must separately name that exact kind before it can be considered
+for automatic approval.
 
 ### 5.4 Standard compatibility pack
 
@@ -313,7 +338,7 @@ Pre-v0.5 workspaces continue to load unchanged through
 | `open_issue` | question |
 
 Other previously reserved standard names also remain generic assertions.
-There is no implicit `User` symbol in v0.5; a workspace must declare every
+There is no implicit `User` symbol in v0.6; a workspace must declare every
 subject it references.
 
 ## 6. DSL grammar
@@ -334,7 +359,7 @@ list        := '[' (value (',' value)*)? ']'
 no loaded schema defines the type.
 
 Nested maps such as `evidence`, `lifecycle`, `access_policy`, `relations`,
-and `guard` are single-level blocks in v0.5.
+and `guard` are single-level blocks in v0.6.
 
 ## 7. Querying: EvidencePack
 
@@ -344,19 +369,26 @@ A query returns a layered pack:
 MUST      applicable constraint memories
 SHOULD    guidance memories
 CONTEXT   scored assertion memories
+PROVISIONAL scored non-active searchable memories
 CONFLICT  declared conflicts among selected memories
 MISSING   question memories and explicit gaps
 ```
 
-Layering depends on runtime role, never on a hard-coded domain type name.
-Superseded, retracted, and archived memories do not surface by default.
+Layering depends on runtime role and lifecycle, never on a hard-coded domain
+type name. MUST, SHOULD, CONTEXT, and MISSING accept only `active`
+declarations. Superseded, retracted, and archived memories do not surface by
+default. Candidate symbols cannot resolve aliases or make an active constraint
+applicable; relevance for active semantic layers is computed only from active
+hits.
 Every item carries its id, type, runtime role, capabilities, evidence,
 lifecycle, confidence, and access policy.
 
-The stable JSON envelope is `memdsl.evidence_pack.v1`. Every serialized pack
-contains `schema_version`, and scored CONTEXT entries additionally expose
-`score` and `matched_terms`. Hosts may add their own runtime projection fields,
-but must preserve the five layers and declaration ids.
+The stable JSON envelope remains `memdsl.evidence_pack.v1`. Version 0.6
+additively adds `provisional`; scored CONTEXT and PROVISIONAL entries expose
+`score` and `matched_terms`. Every declaration item includes `status`,
+`runtime_role`, and lifecycle, and text rendering makes those fields visible.
+Hosts may add their own runtime projection fields, but must preserve the
+layers and declaration ids.
 
 The reference scorer remains lexical plus alias resolution. Retrieval
 backends may be replaced without changing EvidencePack semantics.
@@ -382,21 +414,28 @@ MISSING instead of returning a silent no-match. Consumers should treat a
 no-match with non-empty `excluded_by_filters` as "the memory exists; the
 filter hid it".
 
+PROVISIONAL hits do not suppress active-gap diagnostics. If only provisional
+declarations match, MISSING still reports that no active declaration matched;
+filter-hidden counts and wording likewise refer explicitly to active
+declarations.
+
 ### 7.2 Navigation: memory map and vocabulary
 
 Agent-driven reading needs an index the agent can hold in context before it
 queries. `build_memory_map` produces a compact per-module index of every
-active declaration (id, type, runtime role, subject, scope, truncated claim)
-plus the workspace vocabulary (`subjects` with aliases, `scopes`, `modules`,
-`types`). `workspace_vocabulary` is also returned on no-match MCP queries so
-an agent can re-ask in the workspace's own words. The map is a navigation
-projection, never a citation source: items carry no evidence and claims are
-truncated.
+serviceable declaration (id, type, runtime role, lifecycle status, subject,
+scope, truncated claim) plus the workspace vocabulary (`subjects` with
+aliases, `scopes`, `modules`, `types`). Candidate entries are visibly
+provisional; they are not active authority. `workspace_vocabulary` is also
+returned on no-match MCP queries so an agent can re-ask in the workspace's
+own words. The map is a navigation projection, never a citation source:
+items carry no evidence and claims are truncated.
 
 ## 8. CompliancePack
 
 `memdsl check` and MCP `memory_check` preflight a candidate against
-applicable `constraint` memories.
+applicable active `constraint` memories. Candidate constraints are excluded
+before guard evaluation and cannot produce ALLOW, BLOCK, or NEEDS_REVIEW.
 
 ```text
 verdict                  allow | block | needs_review
@@ -454,15 +493,116 @@ the live workspace's `TypeRegistry`. A proposal using an unknown domain type
 or missing a schema-required field fails before staging.
 
 Pending proposals live under `.memdsl/proposals/` and are never served as
-memory. Human approval revalidates against the current schema and workspace,
-atomically updates the target `.mem` file, appends an audit event, and updates
-proposal state. Locks and idempotent markers make interrupted approval safe
-to retry.
+memory. Version 0.6 adds deterministic routing after validation:
 
-The supported Python entry points are `ReviewStore`, `Proposal`,
-`ValidationResult`, and `staging_dir_for`, exported from the top-level
-`memdsl` package. Agents may propose; approval remains an explicit host or
-human action.
+| Result | Meaning |
+| --- | --- |
+| `invalid` | Parse, schema, or lint failure; no proposal is staged |
+| `no_op` | Canonically identical pending or approved content already exists |
+| `queued` | A person must approve or reject the staged proposal |
+| `auto_approved` | A narrowly eligible candidate assertion passed every policy and host-attestation check |
+
+### 10.1 Trust boundary
+
+Proposal text is never a trust root. The host supplies a `ProposalContext`
+containing an authenticated `client_id` and an optional
+`EvidenceVerification`. Proposal headers and MCP tool arguments cannot
+assert trusted identity, scopes, or verified evidence.
+
+The built-in `workspace_file_quote` verifier resolves `evidence.source`
+inside the explicitly loaded workspace roots, rejects symlinks and path
+escapes, reads an ordinary UTF-8 file, and requires the declared quote to
+occur exactly. Audit records store source, quote, and complete-evidence
+digests, never the source contents or quote text. An embedding host may inject
+another verifier; verifier failure or absence can only route to a person.
+
+### 10.2 Non-configurable safety floor
+
+Version 0.6 can automatically approve only a declaration that satisfies all
+of these conditions:
+
+- runtime role is `assertion`;
+- lifecycle status is `candidate`;
+- the type descriptor explicitly has `auto_approvable`;
+- scope is non-empty and not `global`;
+- lint produced no warnings;
+- access policy is empty and force is neither `hard` nor `strong`;
+- `supersedes`, `revision_of`, and `conflicts_with` are absent;
+- host client is trusted and the evidence attestation matches the current
+  declaration evidence.
+
+`question`, `guidance`, `constraint`, `symbol`, unknown types, active
+declarations, and every uncertain case are always queued. Policy rules can
+only narrow this floor.
+
+### 10.3 ReviewPolicy and deployment keys
+
+The optional strict JSON policy is `<staging>/policy.json`, versioned as
+`memdsl.policy.v1`. It names a workspace-contained `.mem` target, stable
+sampling percentage, finite UTC daily limit, trusted clients, and ordered
+rules. Every automatic rule must name at least one exact kind. Unknown fields,
+unknown kinds, invalid targets, malformed JSON, and unsupported versions raise
+`PolicyError`; a configured invalid policy is never silently treated as
+ordinary queueing.
+
+`memdsl review policy init` writes a valid disabled template:
+`trusted_clients` and `rules` are empty and
+`max_auto_approve_per_day` is zero. Enabling automation requires all of:
+
+1. a schema type with `auto_approvable`;
+2. an exact-kind rule and trusted host client in the policy;
+3. a positive daily limit;
+4. host deployment scope `write:auto`, which is not a default MCP scope.
+
+A valid policy without `write:auto` runs in shadow posture: the proposal is
+queued, while audit retains both the eligible policy assessment and the
+effective `write_auto_not_granted` result.
+
+### 10.4 Determinism, concurrency, and audit
+
+Canonical declaration JSON produces a stable `content_hash`. Duplicate
+pending/approved content returns `no_op`, and sampling uses
+`content_hash + policy_hash`, not a random proposal id, so retries cannot
+evade the human sample. Actual automatic approvals are bounded by the policy's
+UTC daily limit.
+
+`ReviewStore.submit` records `propose` and a complete `route` assessment
+snapshot for every valid new proposal. Before automatic approval it reloads
+the authoritative workspace paths, revalidates the declaration and evidence,
+checks a content fingerprint covering memory, manifest, and schema files, and
+rechecks the daily limit under the review lock. The automatic target must be a
+non-symlink `.mem` file inside the primary workspace root and outside
+`.memdsl`. Automatic approval never uses `force`.
+
+Approval atomically updates the target source, appends an audit event, and
+updates proposal state. Locks and idempotent markers make interrupted approval
+safe to retry. `audit_entries(strict=True)` raises `AuditLogError` on a
+malformed line; corrupted audit cannot silently undercount quota or quality
+statistics.
+
+`memdsl review digest` summarizes pending, sampled, auto-approved, unaudited,
+and flagged writes. `review stats` replays historical routing snapshots
+without consulting the current registry. The `review audit` command with
+`--verdict confirm` or `--verdict flag` appends a human post-review result
+but never edits memory source.
+
+### 10.5 Append-only correction
+
+ReviewStore does not create Git commits and does not physically delete or
+rewrite approved declarations. Promotion, revision, and retraction use a new,
+schema-valid declaration proposal with a new id and `supersedes` (optionally
+also `revision_of`) pointing at the old declaration. Those relations always
+require human review. Once approved, the existing supersession semantics hide
+the old declaration from default query while preserving source and audit
+history. A host may add Git integration, but core correctness does not depend
+on Git.
+
+The supported top-level Python surface includes `ReviewStore`, `Proposal`,
+`ValidationResult`, `AuditLogError`, `ReviewPolicy`, `PolicyRule`,
+`ProposalContext`, `EvidenceVerification`, `RoutingAssessment`,
+`load_policy`, `verify_workspace_file_quote`, `workspace_fingerprint`,
+`review_digest`, `review_stats`, `record_post_review`, and
+`staging_dir_for`.
 
 ## 11. Type discovery surfaces
 
@@ -517,3 +657,9 @@ constraint recall, citation accuracy, and per-case results. The v0.4
 - Standard types are a compatibility pack, not the only allowed worldview.
 - Types are discoverable and versioned.
 - Vector search is a backend, not the memory model.
+- Candidate memory is visible only as PROVISIONAL and never acquires active
+  behavioral authority.
+- Automation requires independently attested identity and evidence; proposal
+  content cannot attest to itself.
+- Source declarations and append-only review history are authoritative.
+  Corrections supersede prior declarations instead of silently rewriting them.

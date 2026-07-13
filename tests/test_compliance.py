@@ -125,6 +125,44 @@ boundary privacy.chinese_public {
     assert pack.violations[0]["boundary_id"] == "boundary:privacy.chinese_public"
 
 
+def test_only_active_constraints_participate_in_compliance():
+    def constraint_workspace(status):
+        ws = Workspace()
+        ws.add_document(parse_text(f'''
+boundary release.provisional_gate {{
+  rule: "Never publish a secret release token."
+  force: hard
+  scope: global
+  lifecycle {{ status: {status} }}
+  guard {{ deny_any: ["secret-token"] }}
+  evidence {{ source: test quote: "Keep the token private." }}
+}}
+''', file=f"{status}.mem"))
+        return ws
+
+    candidate = check_compliance(
+        constraint_workspace("candidate"),
+        "Publish a release note", "Include secret-token in the note.")
+    assert candidate.verdict == "allow"
+    assert candidate.applicable_must == []
+    assert candidate.violations == []
+
+    active = check_compliance(
+        constraint_workspace("active"),
+        "Publish a release note", "Include secret-token in the note.")
+    assert active.verdict == "block"
+    assert [d.id for d in active.applicable_must] == [
+        "boundary:release.provisional_gate"]
+    payload = active.as_dict()
+    assert payload["applicable_must"][0]["status"] == "active"
+    assert payload["applicable_must"][0]["lifecycle"] == {"status": "active"}
+    assert payload["applicable_must"][0]["runtime_role"] == "constraint"
+    text = active.render_text()
+    assert "status=active" in text
+    assert "runtime_role=constraint" in text
+    assert 'lifecycle={"status":"active"}' in text
+
+
 def test_linter_rejects_invalid_guard_regex():
     ws = Workspace()
     ws.add_document(parse_text(r'''

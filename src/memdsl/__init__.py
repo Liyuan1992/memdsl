@@ -2,10 +2,11 @@
 
 A lintable, queryable memory DSL for LLM agents. Memory is written as
 `.mem` source files with named, schema-typed, scoped declarations backed by
-evidence -- then linted like code and queried into layered evidence
-packs (MUST / SHOULD / CONTEXT / CONFLICT / MISSING) that an LLM can
+evidence -- then linted like code and queried into layered evidence packs
+(MUST / SHOULD / CONTEXT / PROVISIONAL / CONFLICT / MISSING) that an LLM can
 follow. Executable constraint guards can also preflight proposed actions into
-CompliancePacks (ALLOW / BLOCK / NEEDS_REVIEW).
+CompliancePacks (ALLOW / BLOCK / NEEDS_REVIEW), while host-attested review
+policies may auto-approve only narrowly scoped candidate assertions.
 """
 
 from memdsl.parser import parse_file, parse_text, ParseError
@@ -20,10 +21,37 @@ from memdsl.query import (
     workspace_vocabulary,
 )
 from memdsl.compliance import check_compliance, CompliancePack
-from memdsl.review import Proposal, ReviewStore, ValidationResult, staging_dir_for
+from memdsl.policy import (
+    AUTO_APPROVABLE_CAPABILITY,
+    POLICY_VERSION,
+    EvidenceVerification,
+    PolicyError,
+    PolicyRule,
+    ProposalContext,
+    ReviewPolicy,
+    RoutingAssessment,
+    RoutingDecision,
+    declaration_content_hash,
+    load_policy,
+    verify_workspace_file_quote,
+)
+from memdsl.review import (
+    AuditLogError,
+    Proposal,
+    ReviewStore,
+    ValidationResult,
+    staging_dir_for,
+    workspace_fingerprint,
+)
+from memdsl.review_reporting import (
+    proposal_review_metadata,
+    record_post_review,
+    review_digest,
+    review_stats,
+)
 from memdsl.schema import SchemaError, TypeDescriptor, TypeRegistry
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 __all__ = [
     "parse_file",
@@ -47,5 +75,23 @@ __all__ = [
     "ReviewStore",
     "ValidationResult",
     "staging_dir_for",
+    "AuditLogError",
+    "PolicyError",
+    "EvidenceVerification",
+    "ProposalContext",
+    "PolicyRule",
+    "ReviewPolicy",
+    "RoutingAssessment",
+    "RoutingDecision",
+    "POLICY_VERSION",
+    "AUTO_APPROVABLE_CAPABILITY",
+    "load_policy",
+    "verify_workspace_file_quote",
+    "declaration_content_hash",
+    "workspace_fingerprint",
+    "proposal_review_metadata",
+    "record_post_review",
+    "review_digest",
+    "review_stats",
     "__version__",
 ]

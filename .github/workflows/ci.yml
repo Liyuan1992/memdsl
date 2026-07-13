@@ -6,6 +6,7 @@ on:
 
 jobs:
   core:
+    name: core / ${{ matrix.os }} / Python ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -22,6 +23,26 @@ jobs:
         run: python -m pip install -U pip build && python -m pip install -e ".[dev]"
       - name: Compile
         run: python -m compileall -q src tests
+      - name: Verify MCP dependency marker
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.9'
+        shell: python
+        run: |
+          from importlib.metadata import requires
+          from packaging.markers import default_environment
+          from packaging.requirements import Requirement
+
+          requirement = next(
+              Requirement(item)
+              for item in (requires("memdsl") or [])
+              if Requirement(item).name == "mcp"
+          )
+          environment = default_environment()
+          environment["extra"] = "mcp"
+          environment["python_version"] = "3.9"
+          assert requirement.marker is not None
+          assert not requirement.marker.evaluate(environment)
+          environment["python_version"] = "3.10"
+          assert requirement.marker.evaluate(environment)
       - name: Test
         run: python -m pytest -q
       - name: CLI smoke
@@ -33,10 +54,11 @@ jobs:
         run: |
           python -m build
           python -m pip install --force-reinstall dist/*.whl
-          python -c "import memdsl; assert memdsl.__version__ == '0.5.1'; assert memdsl.EVIDENCE_PACK_SCHEMA == 'memdsl.evidence_pack.v1'"
+          python -c "import memdsl; assert memdsl.__version__ == '0.6.0'; assert memdsl.EVIDENCE_PACK_SCHEMA == 'memdsl.evidence_pack.v1'; assert memdsl.POLICY_VERSION == 'memdsl.policy.v1'"
           python -m twine check dist/*
 
   mcp:
+    name: mcp / ${{ matrix.os }} / Python 3.12
     strategy:
       fail-fast: false
       matrix:

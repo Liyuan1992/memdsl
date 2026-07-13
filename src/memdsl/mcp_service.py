@@ -12,16 +12,19 @@ Every payload carries:
 
 Access is gated by scopes (comma-separated in MEMDSL_MCP_SCOPES or passed
 explicitly): "read:summary" for status/list/lint/source, "read:search"
-for query/explain/check, "write:candidate" for memory_propose. Writes are
-propose-only and fail-closed: a proposal lands in the review queue
-(`memdsl.review.ReviewStore`) and nothing becomes memory until a human
-approves it with `memdsl review approve`.
+for query/explain/check, and "write:candidate" for memory_propose.  The
+optional "write:auto" scope is a deployment key for policy-authorized writes;
+it is never enabled by default.  Pending proposals remain invisible.  Only a
+candidate assertion that passes the non-configurable safety floor, an explicit
+workspace policy, host identity, verified evidence, quota, and sampling may be
+auto-approved into the PROVISIONAL layer.
 """
 
 from __future__ import annotations
 
+import datetime as _dt
 import os
-from typing import List, Optional, Sequence, Union
+from typing import Callable, List, Mapping, Optional, Sequence, Union
 
 from memdsl import __version__
 from memdsl.compliance import check_compliance
@@ -35,18 +38,30 @@ from memdsl.query import (
     render_memory_map_text,
     workspace_vocabulary,
 )
-from memdsl.review import ReviewStore, staging_dir_for
+from memdsl.policy import (
+    AUTO_APPROVABLE_CAPABILITY,
+    EvidenceVerification,
+    PolicyError,
+    ProposalContext,
+    load_policy,
+    verify_workspace_file_quote,
+)
+from memdsl.review import AuditLogError, ReviewStore, staging_dir_for
+from memdsl.review_reporting import proposal_review_metadata
 from memdsl.schema import SchemaError
 
 SUMMARY_SCOPE = "read:summary"
 SEARCH_SCOPE = "read:search"
 WRITE_CANDIDATE_SCOPE = "write:candidate"
+WRITE_AUTO_SCOPE = "write:auto"
 DEFAULT_SCOPES = frozenset({SUMMARY_SCOPE, SEARCH_SCOPE, WRITE_CANDIDATE_SCOPE})
 
 QUERY_BOUNDARY = (
-    "MUST items are hard rules to enforce, not context to weigh. CONTEXT "
-    "items are scored candidates. Never average the two kinds of signal. "
-    "Surface CONFLICT items instead of silently resolving them."
+    "MUST items are active hard rules to enforce, not context to weigh. "
+    "SHOULD and CONTEXT contain active guidance and assertions. PROVISIONAL "
+    "items are non-active, unconfirmed candidates and never carry MUST, "
+    "SHOULD, CONTEXT, MISSING, or compliance authority. Surface CONFLICT "
+    "items instead of silently resolving them."
 )
 
 RESOURCE_URIS = (
@@ -75,9 +90,29 @@ PROPOSE_BOUNDARY = (
     "accepted fact or rule."
 )
 
+AUTO_APPROVED_BOUNDARY = (
+    "This proposal was auto-approved as candidate-status provisional memory. "
+    "It has not been human-confirmed. It never becomes MUST, SHOULD, CONTEXT, "
+    "MISSING, or an enforceable compliance constraint while non-active. A "
+    "human may later confirm or flag it and may supersede it through another "
+    "reviewed declaration proposal."
+)
+
+NO_OP_BOUNDARY = (
+    "This submission is an exact normalized duplicate. No second proposal or "
+    "memory declaration was created; the response points to the existing record."
+)
+
 
 class MCPScopeError(PermissionError):
     """Raised when a requested operation is outside the configured scopes."""
+
+
+EvidenceVerifier = Callable[
+    [Optional[Mapping[str, object]], Sequence[str]],
+    EvidenceVerification,
+]
+ProposalContextFactory = Callable[[str], ProposalContext]
 
 
 def parse_scopes(value: Union[str, Sequence[str], None] = None) -> set:
@@ -102,6 +137,8 @@ class MemdslMCPService:
         scopes: Union[str, Sequence[str], None] = None,
         staging: Optional[str] = None,
         client_name: str = "",
+        evidence_verifier: Optional[EvidenceVerifier] = verify_workspace_file_quote,
+        context_factory: Optional[ProposalContextFactory] = None,
     ) -> None:
         paths = [os.path.abspath(str(p)) for p in workspace_paths if str(p).strip()]
         if not paths:
@@ -112,6 +149,12 @@ class MemdslMCPService:
         self.workspace_paths = paths
         self.scopes = parse_scopes(scopes)
         self.client_name = client_name or os.getenv("MEMDSL_MCP_CLIENT", "mcp-client")
+        if evidence_verifier is not None and not callable(evidence_verifier):
+            raise TypeError("evidence_verifier must be callable or None")
+        if context_factory is not None and not callable(context_factory):
+            raise TypeError("context_factory must be callable or None")
+        self.evidence_verifier = evidence_verifier
+        self.context_factory = context_factory
         self._staging = staging
         self._review: Optional[ReviewStore] = None
         self._ws: Optional[Workspace] = None
@@ -166,6 +209,92 @@ class MemdslMCPService:
                 f"Configured scopes: {', '.join(sorted(self.scopes)) or '(none)'}"
             )
 
+    def _write_auto_granted(self) -> bool:
+        return WRITE_AUTO_SCOPE in self.scopes or "all" in self.scopes
+
+    def _base_proposal_context(self) -> tuple:
+        """Build host-owned identity without accepting proposal/tool attestation."""
+        if self.context_factory is None:
+            return ProposalContext(client_id=self.client_name), ""
+        try:
+            context = self.context_factory(self.client_name)
+        except Exception:
+            return ProposalContext(client_id=self.client_name), "context_factory_exception"
+        if not isinstance(context, ProposalContext):
+            return ProposalContext(client_id=self.client_name), "context_factory_invalid"
+        return context, ""
+
+    def _proposal_context(self, ws: Workspace, source: str) -> ProposalContext:
+        """Attach host-verified evidence, failing closed to an unverified proof."""
+        context, context_error = self._base_proposal_context()
+        if context.evidence_verification is not None:
+            return context
+
+        validation = self.review_store.validate(ws, source)
+        evidence = (
+            validation.declaration.evidence
+            if validation.declaration is not None else None)
+        if context_error:
+            proof = EvidenceVerification.unverified(
+                context_error, evidence=evidence)
+            return context.with_evidence(proof)
+        if self.evidence_verifier is None:
+            proof = EvidenceVerification.unverified(
+                "evidence_verifier_unavailable", evidence=evidence)
+            return context.with_evidence(proof)
+        try:
+            proof = self.evidence_verifier(evidence, self.workspace_paths)
+        except Exception:
+            proof = EvidenceVerification.unverified(
+                "evidence_verifier_exception",
+                verifier=_callable_name(self.evidence_verifier),
+                evidence=evidence,
+            )
+        if not isinstance(proof, EvidenceVerification):
+            proof = EvidenceVerification.unverified(
+                "evidence_verifier_invalid_result",
+                verifier=_callable_name(self.evidence_verifier),
+                evidence=evidence,
+            )
+        return context.with_evidence(proof)
+
+    def _automation_effective(self, policy, ws: Workspace, auto_today: int) -> bool:
+        """Whether this service configuration can still auto-route a safe type."""
+        if (
+            policy is None
+            or not self._write_auto_granted()
+            or policy.sample_to_queue_percent >= 100
+            or auto_today >= policy.max_auto_approve_per_day
+        ):
+            return False
+        context, context_error = self._base_proposal_context()
+        if context_error or context.client_id not in policy.trusted_clients:
+            return False
+        if self.evidence_verifier is None:
+            proof = context.evidence_verification
+            if proof is None or not proof.verified:
+                return False
+        for rule in policy.rules:
+            rule_clients = rule.match.get("client")
+            if rule_clients and context.client_id not in rule_clients:
+                continue
+            scopes = rule.match.get("scope")
+            excluded_scopes = set(rule.match.get("scope_not", ()))
+            if scopes and not any(
+                    scope and str(scope).strip().lower() != "global"
+                    and scope not in excluded_scopes
+                    for scope in scopes):
+                continue
+            for kind in rule.match["kind"]:
+                descriptor = ws.registry.resolve(kind)
+                if (
+                    descriptor is not None
+                    and descriptor.runtime_role == "assertion"
+                    and descriptor.has_capability(AUTO_APPROVABLE_CAPABILITY)
+                ):
+                    return True
+        return False
+
     def _workspace_error(
         self,
         schema_version: str,
@@ -195,6 +324,51 @@ class MemdslMCPService:
         kinds: dict = {}
         for d in ws.declarations:
             kinds[d.kind] = kinds.get(d.kind, 0) + 1
+        policy_present = os.path.isfile(
+            os.path.join(self.review_store.staging_dir, "policy.json"))
+        try:
+            policy = load_policy(self.review_store.staging_dir, registry=ws.registry)
+            if policy is not None:
+                self.review_store.validate_policy_target(
+                    policy, self.workspace_paths)
+        except PolicyError as exc:
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": "policy_invalid",
+                "error": "policy_invalid",
+                "details": [str(exc)],
+                "policy_present": policy_present,
+                "policy_valid": False,
+                "write_auto_granted": self._write_auto_granted(),
+                "boundary": (
+                    "A configured review policy is invalid. Writes fail closed "
+                    "until the operator fixes or removes policy.json."
+                ),
+            }
+        try:
+            audit = self.review_store.audit_entries(strict=True)
+        except AuditLogError as exc:
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": "audit_invalid",
+                "error": "audit_invalid",
+                "details": [str(exc)],
+                "policy_present": policy_present,
+                "policy_valid": policy is not None,
+                "policy_hash": policy.source_hash if policy is not None else "",
+                "write_auto_granted": self._write_auto_granted(),
+                "boundary": (
+                    "The append-only audit log cannot be replayed reliably. "
+                    "Automatic approval is disabled until it is repaired."
+                ),
+            }
+        auto_ids, reviewed_ids = _automatic_review_ids(audit)
+        today = _dt.datetime.now(_dt.timezone.utc).date().isoformat()
+        auto_today = len(_automatic_route_reservation_ids(audit, today))
+        write_auto = self._write_auto_granted()
+        automation_effective = self._automation_effective(policy, ws, auto_today)
         return {
             "ok": True,
             "schema_version": schema,
@@ -203,7 +377,12 @@ class MemdslMCPService:
             "workspace_paths": list(self.workspace_paths),
             "files": len(ws.files),
             "declarations": len(ws.declarations),
-            "active_declarations": len(ws.active()),
+            "active_declarations": sum(
+                1 for declaration in ws.active()
+                if declaration.status == "active"),
+            "provisional_declarations": sum(
+                1 for declaration in ws.active()
+                if declaration.status != "active"),
             "kinds": dict(sorted(kinds.items())),
             "types": dict(sorted(kinds.items())),
             "registered_types": self._ws.registry.names(),
@@ -212,9 +391,21 @@ class MemdslMCPService:
             "resources": list(RESOURCE_URIS),
             "tools": list(TOOL_NAMES),
             "pending_proposals": len(self.review_store.list(status="pending")),
+            "policy_present": policy_present,
+            "policy_valid": True,
+            "policy_hash": policy.source_hash if policy is not None else "",
+            "write_auto_granted": write_auto,
+            "automation_effective": automation_effective,
+            "auto_approvals_today": auto_today,
+            "max_auto_approve_per_day": (
+                policy.max_auto_approve_per_day if policy is not None else 0),
+            "unaudited_auto_approvals": len(auto_ids - reviewed_ids),
             "boundary": (
-                "Writes are propose-only: memory_propose stages a proposal for "
-                "human review; this server never approves or serves unapproved memory."
+                "Pending proposals are never served. Automatic approval is "
+                "available only for policy- and type-opted-in candidate "
+                "assertions with a trusted client, verified evidence, write:auto, "
+                "quota, and sampling approval; they remain PROVISIONAL until a "
+                "human-approved revision activates or supersedes them."
             ),
         }
 
@@ -281,7 +472,12 @@ class MemdslMCPService:
             limit=limit,
         )
         pack_dict = pack.as_dict()
-        matched = bool(pack_dict["must"] or pack_dict["should"] or pack_dict["context"])
+        matched = bool(
+            pack_dict["must"]
+            or pack_dict["should"]
+            or pack_dict["context"]
+            or pack_dict.get("provisional")
+        )
         next_actions = []
         if matched:
             next_actions.append(
@@ -542,17 +738,76 @@ class MemdslMCPService:
             "boundary": "Diagnostics describe the memory source; fixing it is a human edit, not an MCP write.",
         }
 
-    # ---- gated writes (propose-only) ----
+    # ---- governed writes ----
 
     def propose(self, source: str, *, reason: str = "") -> dict:
         self.require_scope(WRITE_CANDIDATE_SCOPE)
-        schema = "memdsl.mcp.propose.v1"
+        schema = "memdsl.mcp.propose.v2"
         try:
             ws = self.workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
-        result = self.review_store.create(
-            ws, source, reason=reason, client=self.client_name)
+        try:
+            policy = load_policy(self.review_store.staging_dir, registry=ws.registry)
+        except PolicyError as exc:
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": "policy_invalid",
+                "error": "policy_invalid",
+                "details": [str(exc)],
+                "boundary": (
+                    "A configured policy is invalid. Nothing was staged or "
+                    "approved; fix or remove policy.json before retrying."
+                ),
+                "next_actions": [
+                    "Run `memdsl review policy validate <workspace>` and fix every error."
+                ],
+            }
+        write_auto = self._write_auto_granted()
+        context = self._proposal_context(ws, source) if policy is not None else None
+        try:
+            result = self.review_store.submit(
+                self.workspace_paths,
+                source,
+                reason=reason,
+                client=self.client_name,
+                policy=policy,
+                context=context,
+                blocking_reasons=([] if write_auto else ["write_auto_not_granted"]),
+                write_auto_granted=write_auto,
+                evidence_verifier=self.evidence_verifier,
+            )
+        except PolicyError as exc:
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": "policy_invalid",
+                "error": "policy_invalid",
+                "details": [str(exc)],
+                "boundary": (
+                    "The review policy or its automatic target is unsafe. "
+                    "Nothing was auto-approved."
+                ),
+                "next_actions": [
+                    "Run `memdsl review policy validate <workspace>` and correct the policy."
+                ],
+            }
+        except AuditLogError as exc:
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": "audit_invalid",
+                "error": "audit_invalid",
+                "details": [str(exc)],
+                "boundary": (
+                    "The append-only audit cannot be replayed reliably, so "
+                    "policy routing failed closed before automatic approval."
+                ),
+                "next_actions": [
+                    "Inspect and repair the audit log without deleting valid history."
+                ],
+            }
         if not result["ok"]:
             return {
                 "ok": False,
@@ -567,21 +822,59 @@ class MemdslMCPService:
                     "requires_evidence capability need a verbatim evidence quote).",
                 ],
             }
-        return {
+        route = str(result.get("route") or "queued")
+        rule = str(result.get("rule") or result.get("route_rule") or "no_policy")
+        reason_codes = list(result.get("reason_codes") or (
+            ["policy_missing"] if policy is None else ["human_review_required"]))
+        if route == "auto_approved":
+            boundary = AUTO_APPROVED_BOUNDARY
+            next_actions = [
+                "Treat the new declaration only as PROVISIONAL candidate memory.",
+                "Use `memdsl review digest <workspace>` and `memdsl review audit` "
+                "to confirm or flag policy-approved items.",
+            ]
+        elif route == "no_op":
+            boundary = NO_OP_BOUNDARY
+            next_actions = [
+                "Use the returned existing proposal or declaration id; do not resubmit it."
+            ]
+        else:
+            boundary = (
+                PROPOSE_BOUNDARY
+                + (f" Routing reason: {reason_codes[0]}." if reason_codes else "")
+            )
+            next_actions = [
+                "Tell the user the proposal is pending and how to review it: "
+                "`memdsl review list <workspace>` then "
+                f"`memdsl review approve <workspace> {result.get('proposal_id', '')} --into <file.mem>`.",
+            ]
+        payload = {
             "ok": True,
             "schema_version": schema,
-            "status": "pending_review",
-            "proposal_id": result["proposal_id"],
-            "declaration_id": result["declaration_id"],
-            "path": result["path"],
+            "status": result.get("status", "pending_review"),
+            "route": route,
+            "proposal_id": result.get("proposal_id", ""),
+            "declaration_id": result.get("declaration_id", ""),
+            "path": result.get("path", ""),
+            "rule": rule,
+            "reason_codes": reason_codes,
+            "assessment_hash": result.get("assessment_hash", ""),
+            "eligible_route": result.get("eligible_route", route),
             "warnings": result.get("warnings", []),
-            "boundary": PROPOSE_BOUNDARY,
-            "next_actions": [
-                "Tell the user a proposal is pending and how to review it: "
-                "`memdsl review list <workspace>` then "
-                f"`memdsl review approve <workspace> {result['proposal_id']} --into <file.mem>`.",
-            ],
+            "boundary": boundary,
+            "next_actions": next_actions,
         }
+        if result.get("merged_into"):
+            payload["merged_into"] = result["merged_into"]
+        if result.get("content_hash"):
+            payload["content_hash"] = result["content_hash"]
+        if result.get("policy_hash"):
+            payload["policy_hash"] = result["policy_hash"]
+        if result.get("duplicate_of"):
+            payload["duplicate_of"] = result["duplicate_of"]
+        if result.get("approval_error"):
+            payload["approval_error"] = result["approval_error"]
+        return payload
 
     def list_proposals(self, *, status: str = "pending", limit: int = 50) -> dict:
         self.require_scope(SUMMARY_SCOPE)
@@ -594,7 +887,29 @@ class MemdslMCPService:
                 "error": "status must be pending, approved, rejected, or all",
             }
         limit = _clamp_int(limit, 1, 200, 50)
-        proposals = [p.summary() for p in self.review_store.list(status=status)]
+        try:
+            audit = self.review_store.audit_entries(strict=True)
+        except AuditLogError as exc:
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": "audit_invalid",
+                "error": "audit_invalid",
+                "details": [str(exc)],
+            }
+        metadata = proposal_review_metadata(audit)
+        proposals = []
+        for proposal in self.review_store.list(status=status):
+            summary = proposal.summary()
+            review = metadata.get(proposal.id, {})
+            summary.update({
+                "route": review.get("route", "legacy_unknown"),
+                "rule": review.get("rule", "legacy_unknown"),
+                "assessment_hash": review.get("assessment_hash", ""),
+                "content_hash": review.get("content_hash", ""),
+                "post_review_verdict": review.get("post_review_verdict", ""),
+            })
+            proposals.append(summary)
         return {
             "ok": True,
             "schema_version": schema,
@@ -602,9 +917,15 @@ class MemdslMCPService:
             "filter": status,
             "total": len(proposals),
             "proposals": proposals[:limit],
-            "boundary": PROPOSE_BOUNDARY,
+            "boundary": (
+                "Pending proposals remain invisible. Policy-approved candidate "
+                "assertions are PROVISIONAL and may receive a later human "
+                "confirm or flag; high-risk and superseding writes require a "
+                "human decision."
+            ),
             "next_actions": [
-                "Approval and rejection are human-only, via the memdsl review CLI.",
+                "Use the memdsl review CLI for approve/reject, digest, stats, "
+                "and post-review audit decisions.",
             ],
         }
 
@@ -672,6 +993,43 @@ class MemdslMCPService:
             "path": path,
             "content": content,
         }
+
+
+def _automatic_review_ids(entries: Sequence[dict]) -> tuple:
+    automatic = {
+        str(entry.get("proposal_id", ""))
+        for entry in entries
+        if entry.get("action") == "approve"
+        and str(entry.get("by", "")).startswith("policy:")
+        and entry.get("proposal_id")
+    }
+    reviewed = {
+        str(entry.get("proposal_id", ""))
+        for entry in entries
+        if entry.get("action") == "post_review"
+        and entry.get("verdict") in ("confirm", "flag")
+        and entry.get("proposal_id")
+    }
+    return automatic, reviewed
+
+
+def _automatic_route_reservation_ids(
+    entries: Sequence[dict], day: str,
+) -> set:
+    """Replay the same route reservations used by ReviewStore's daily quota."""
+    return {
+        str(entry.get("proposal_id", ""))
+        for entry in entries
+        if str(entry.get("ts", ""))[:10] == day
+        and entry.get("action") == "route"
+        and entry.get("decision") == "auto_approve"
+        and entry.get("proposal_id")
+    }
+
+
+def _callable_name(value: object) -> str:
+    name = getattr(value, "__name__", "")
+    return " ".join(name.split()) if isinstance(name, str) else ""
 
 
 def _clamp_int(value, minimum: int, maximum: int, default: int) -> int:

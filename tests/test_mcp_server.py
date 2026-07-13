@@ -58,6 +58,15 @@ def test_tools_registered(server):
     assert set(TOOL_NAMES) <= names
 
 
+def test_memory_propose_tool_does_not_accept_attestation_fields(server):
+    tools = asyncio.run(server.list_tools())
+    tool = next(item for item in tools if item.name == "memory_propose")
+    properties = tool.inputSchema.get("properties", {})
+    assert set(properties) == {"source", "reason"}
+    assert not ({"client", "trusted", "verified", "verifier", "scopes"}
+                & set(properties))
+
+
 def test_resources_registered(server):
     resources = asyncio.run(server.list_resources())
     uris = {str(r.uri) for r in resources}

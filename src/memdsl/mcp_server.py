@@ -29,19 +29,23 @@ SERVER_INSTRUCTIONS = (
     "memdsl serves agent memory written as .mem source files. Call "
     "memory_map once at session start so you know what memory exists and "
     "which vocabulary it uses, then call memory_query with the task's key "
-    "nouns and obey the layered contract: MUST items are hard constraints "
-    "to enforce, SHOULD items are guidance, CONTEXT items are scored "
-    "candidate facts, CONFLICT items must be surfaced to the user, and "
-    "MISSING items are known gaps. A no_match result is a retry signal, not "
+    "nouns and obey the layered contract: MUST items are active hard "
+    "constraints, SHOULD items are active guidance, CONTEXT items are active "
+    "assertions, and PROVISIONAL items are non-active, unconfirmed candidates "
+    "that never carry MUST/SHOULD/CONTEXT/MISSING/compliance authority. "
+    "CONFLICT items must be surfaced to the user, and MISSING items are known "
+    "gaps. A no_match result is a retry signal, not "
     "proof of absence: check search_trace for filter exclusions, re-query "
     "with the returned workspace vocabulary, or browse memory_list and the "
     "raw memdsl://file/{file_id} sources. Call memory_explain on a "
     "declaration id before citing it as evidence. Before returning or acting "
     "on a consequential draft, call memory_check; BLOCK forbids the draft and "
-    "NEEDS_REVIEW is not approval. Writes are propose-only: "
-    "memory_propose stages a declaration for human review and nothing "
-    "becomes memory until a person approves it with the memdsl review CLI. "
-    "Never present a pending proposal as accepted memory."
+    "NEEDS_REVIEW is not approval. memory_propose always passes through the "
+    "review gate. Pending proposals remain invisible. A deployment may grant "
+    "write:auto, but only an explicitly opted-in candidate assertion with a "
+    "trusted host client, verified workspace evidence, a matching policy, "
+    "quota, and sampling approval can enter PROVISIONAL automatically. Never "
+    "present pending or provisional memory as human-confirmed authority."
 )
 
 
@@ -64,7 +68,7 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
 
     @mcp.resource("memdsl://map", mime_type="application/json")
     def memdsl_map() -> str:
-        """Compact per-module index of all active memory, for session-start context."""
+        """Compact index of serviceable active and provisional lifecycle memory."""
         return _json(svc.memory_map())
 
     @mcp.resource("memdsl://files", mime_type="application/json")
@@ -87,7 +91,7 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
 
     @mcp.tool(name="memory_map")
     def memory_map() -> dict:
-        """Compact index of all active memory (modules, ids, one-line claims, vocabulary). Read once at session start so you know what memory exists before querying."""
+        """Compact index of serviceable active and provisional lifecycle memory. Read once at session start before querying."""
         return svc.memory_map()
 
     @mcp.tool(name="memory_query")
@@ -98,7 +102,7 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         subject: str = "",
         limit: int = 8,
     ) -> dict:
-        """Query memory into a layered evidence pack (MUST/SHOULD/CONTEXT/CONFLICT/MISSING)."""
+        """Query memory into MUST/SHOULD/CONTEXT/PROVISIONAL/CONFLICT/MISSING layers."""
         return svc.query(
             query, kinds=kinds, types=types,
             subject=subject or None, limit=limit)
@@ -153,12 +157,12 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
 
     @mcp.tool(name="memory_propose")
     def memory_propose(source: str, reason: str = "") -> dict:
-        """Propose one .mem declaration for human review. Fail-closed: it must parse and pass lint (evidence quote required); it is NOT memory until approved."""
+        """Submit one declaration to governed review. Pending writes stay invisible; narrowly opted-in candidate assertions may be policy-approved only from host-verified evidence."""
         return svc.propose(source, reason=reason)
 
     @mcp.tool(name="memory_review_list")
     def memory_review_list(status: str = "pending", limit: int = 50) -> dict:
-        """List review-queue proposals (pending/approved/rejected/all). Approval itself is human-only via the memdsl review CLI."""
+        """List review proposals and routing metadata (pending/approved/rejected/all). High-risk, sampled, and superseding decisions remain human-reviewed."""
         return svc.list_proposals(status=status, limit=limit)
 
     @mcp.prompt(name="memdsl_task_brief")
@@ -169,7 +173,9 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
             "which vocabulary it uses. Then call memory_query with the "
             "task's key nouns. Treat MUST items as constraints you enforce "
             "even when they seem irrelevant, SHOULD items as guidance, and "
-            "CONTEXT items as candidate facts. Surface CONFLICT items to the "
+            "CONTEXT items as active assertions, and PROVISIONAL items as "
+            "unconfirmed non-active candidates that cannot control behavior. "
+            "Surface CONFLICT items to the "
             "user instead of resolving them silently, and state MISSING gaps "
             "rather than guessing. If a query returns no_match, do not "
             "conclude the memory is absent: check search_trace for filter "
@@ -226,7 +232,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         help=".mem file or directory (repeatable; default: MEMDSL_WORKSPACE)")
     parser.add_argument(
         "--scopes", default="",
-        help="comma-separated scopes (default: read:summary,read:search,write:candidate)")
+        help=("comma-separated scopes (default: read:summary,read:search,"
+              "write:candidate; add write:auto explicitly for policy routing)"))
+    parser.add_argument(
+        "--client", default="",
+        help=("host-authenticated client id used by review policy "
+              "(default: MEMDSL_MCP_CLIENT or mcp-client)"))
     parser.add_argument(
         "--staging", default="",
         help="review-queue staging dir (default: <workspace>/.memdsl)")
@@ -246,7 +257,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         service = MemdslMCPService(
-            workspaces, scopes=args.scopes or None, staging=args.staging or None)
+            workspaces,
+            scopes=args.scopes or None,
+            staging=args.staging or None,
+            client_name=args.client or "",
+        )
     except (ValueError, FileNotFoundError) as exc:
         print(str(exc), file=sys.stderr)
         return 2

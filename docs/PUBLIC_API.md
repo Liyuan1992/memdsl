@@ -1,21 +1,54 @@
-# memdsl 0.5 Public Python API
+# memdsl 0.6 Public Python API
 
-memdsl 0.5 supports in-process hosts such as DigitalSelf without requiring an
-MCP subprocess. Import stable entry points from the package root:
+Release date: 2026-07-14
+
+The dependency-free core API supports Python 3.9+. The optional
+`memdsl[mcp]` extra and `memdsl-mcp` server require Python 3.10+ because
+`mcp>=1.2` does. In-process Python 3.9 hosts can use every API documented
+below except the MCP SDK/server surface.
+
+Import stable entry points from the package root:
 
 ```python
 from memdsl import (
+    AUTO_APPROVABLE_CAPABILITY,
     EVIDENCE_PACK_SCHEMA,
+    POLICY_VERSION,
+    AuditLogError,
+    CompliancePack,
+    Declaration,
+    EvidencePack,
+    EvidenceVerification,
+    ParseError,
+    PolicyError,
+    PolicyRule,
     Proposal,
+    ProposalContext,
+    ReviewPolicy,
     ReviewStore,
+    RoutingAssessment,
+    RoutingDecision,
+    SchemaError,
+    TypeDescriptor,
     TypeRegistry,
     ValidationResult,
     Workspace,
     build_evidence_pack,
     build_memory_map,
+    check_compliance,
+    declaration_content_hash,
     lint,
+    load_policy,
+    parse_file,
+    parse_text,
+    proposal_review_metadata,
+    record_post_review,
     render_memory_map_text,
+    review_digest,
+    review_stats,
     staging_dir_for,
+    verify_workspace_file_quote,
+    workspace_fingerprint,
     workspace_vocabulary,
 )
 ```
@@ -27,47 +60,265 @@ workspace = Workspace.load(["memory"])
 diagnostics = lint(workspace)
 pack = build_evidence_pack(workspace, "project release rules")
 payload = pack.as_dict()
+
 assert payload["schema_version"] == "memdsl.evidence_pack.v1"
+active_context = payload["context"]
+candidate_hits = payload["provisional"]
 ```
 
-The five layers are stable: `must`, `should`, `context`, `conflicts`, and
-`missing`. Domain type names are not hard-coded into the query executor;
-`runtime_role` controls layering.
+The schema id remains `memdsl.evidence_pack.v1`. Version 0.6 additively
+adds `provisional`. Only active declarations enter `must`, `should`,
+`context`, and `missing`; scored non-active searchable hits enter
+`provisional` with `score`, `matched_terms`, `status`,
+`runtime_role`, and lifecycle.
 
-Serialized packs additively expose `search_trace` (query interpretation,
-applied filters, and matches a filter excluded) so a miss carries enough
+Candidate symbols cannot affect alias resolution, and candidate constraints
+cannot enter MUST or deterministic compliance.
+
+Serialized packs also expose `search_trace` so a miss carries enough
 information to retry instead of looking like absence.
 
 ## Navigation path
 
 ```python
-from memdsl import build_memory_map, render_memory_map_text, workspace_vocabulary
-
-map_data = build_memory_map(workspace)     # per-module index + vocabulary
-text = render_memory_map_text(map_data)    # compact context-resident form
-vocab = workspace_vocabulary(workspace)    # subjects/aliases/scopes/types
+map_data = build_memory_map(workspace)
+text = render_memory_map_text(map_data)
+vocab = workspace_vocabulary(workspace)
 ```
 
-The map is a navigation projection for agents that read memory themselves:
-items carry no evidence and claims are truncated, so it is never a citation
-source. Hosts should load it (or `memdsl map <workspace>` / MCP
-`memory_map`) at session start.
+The map is a navigation projection. It includes every serviceable declaration
+and makes lifecycle status explicit; candidate entries are provisional, not
+active authority. Items carry no evidence and claims are truncated, so the map
+is never a citation source.
 
-## Reviewed write path
+## Governed write path
+
+`ReviewStore.create()` remains the compatibility propose-only entry point:
 
 ```python
-store = ReviewStore(staging_dir_for(["memory"]))
-result = store.create(workspace, proposal_source, client="host-runtime")
+paths = ["memory"]
+workspace = Workspace.load(paths)
+store = ReviewStore(staging_dir_for(paths))
+
+queued = store.create(
+    workspace,
+    proposal_source,
+    client="host-display-name",
+)
 ```
 
-`create()` only stages a proposal. Pending proposals are not loaded by
-`Workspace.load()` and are not queryable. `approve()` revalidates against the
-current workspace, writes atomically, appends an audit record, and is
-idempotent under concurrent retries. Hosts remain responsible for permission,
-identity, confirmation, and UI policy.
+For policy routing, use `submit()` with authoritative paths:
+
+```python
+policy = load_policy(store.staging_dir, registry=workspace.registry)
+assert policy is not None
+context = ProposalContext(client_id="mcp-client")
+
+result = store.submit(
+    paths,
+    proposal_source,
+    reason="captured from a verified workspace document",
+    policy=policy,
+    context=context,
+    write_auto_granted=True,
+)
+
+assert result["status"] in {
+    "pending_review",
+    "auto_approved",
+    "no_op",
+    "invalid",
+}
+```
+
+`ProposalContext.client_id` is host-authenticated identity. Proposal source,
+proposal headers, and tool arguments cannot set it. If the context has no
+evidence attestation, `submit()` uses the built-in
+`workspace_file_quote` verifier against the authoritative workspace paths.
+The declaration's `evidence.source` must resolve to a non-symlink UTF-8 file
+inside a workspace root and its `evidence.quote` must occur exactly.
+
+Automatic approval additionally requires:
+
+- a valid `memdsl.policy.v1` policy;
+- host `write:auto` authority;
+- an exact-kind rule and trusted client;
+- a candidate assertion type with `auto_approvable`;
+- narrow scope, zero warnings, verified evidence, and no high-risk fields;
+- a positive, unexhausted daily limit and a non-sampled route.
+
+With no policy, no `write:auto`, or any uncertainty, `submit()` stages the
+proposal for a person and records a full route assessment. A valid policy
+without `write:auto` is useful as shadow mode: `eligible_route` records
+what the policy would have done.
+
+`submit()` reloads and fingerprints authoritative paths before automatic
+approval. Its policy target must be a non-symlink `.mem` file inside the
+primary workspace root and outside `.memdsl`; the automatic path never uses
+`force`.
+
+Compatibility overload:
+
+```python
+result = store.submit(
+    workspace,
+    proposal_source,
+    workspace_paths=paths,
+    policy=policy,
+    context=context,
+    write_auto_granted=True,
+)
+```
+
+The paths form is preferred because automatic approval must be able to reload
+current source and schema state.
+
+## In-process MCP host attestation
+
+`MemdslMCPService` exposes two host-only injection points:
+
+```python
+from typing import Callable, Mapping, Optional, Sequence
+
+from memdsl import EvidenceVerification, ProposalContext
+from memdsl.mcp_service import MemdslMCPService
+
+
+TRUSTED_SOURCES = {
+    "ticket://fictional/42": "The fictional build is green.",
+}
+
+
+def context_factory(client_id: str) -> ProposalContext:
+    # Authentication/configuration happened in the host, outside the MCP tool.
+    if client_id != "mcp:fictional-collector":
+        raise ValueError("unrecognized host client")
+    return ProposalContext(client_id=client_id)
+
+
+def evidence_verifier(
+    evidence: Optional[Mapping[str, object]],
+    workspace_paths: Sequence[str],
+) -> EvidenceVerification:
+    if not isinstance(evidence, Mapping):
+        return EvidenceVerification.unverified("missing_evidence")
+    source = evidence.get("source")
+    quote = evidence.get("quote")
+    content = TRUSTED_SOURCES.get(source) if isinstance(source, str) else None
+    if not isinstance(quote, str) or content is None or quote not in content:
+        return EvidenceVerification.unverified(
+            "host_source_or_quote_not_verified",
+            verifier="fictional_ticket_connector",
+            evidence=evidence,
+            source_content=content,
+        )
+    return EvidenceVerification.verified_content(
+        verifier="fictional_ticket_connector",
+        evidence=evidence,
+        source_content=content,
+    )
+
+
+service = MemdslMCPService(
+    ["memory"],
+    scopes="read:summary,read:search,write:candidate,write:auto",
+    client_name="mcp:fictional-collector",
+    context_factory=context_factory,
+    evidence_verifier=evidence_verifier,
+)
+```
+
+The public callable contracts are:
+
+```python
+EvidenceVerifier = Callable[
+    [Optional[Mapping[str, object]], Sequence[str]],
+    EvidenceVerification,
+]
+ProposalContextFactory = Callable[[str], ProposalContext]
+```
+
+The default `evidence_verifier` is `workspace_file_quote`.
+`context_factory=None` creates a host-owned context from the configured
+`client_name`. A missing verifier, exception, or return value that is not an
+`EvidenceVerification` becomes an unverified proof and can only queue.
+Likewise, an exception or invalid value from `context_factory` fails closed.
+
+If a context factory returns a `ProposalContext` that already contains
+`evidence_verification`, the service may use that attestation for routing, but
+automatic approval still requires a matching `evidence_verifier` callback.
+Inside the approval lock, memdsl reloads the authoritative workspace, parses
+the fresh declaration, invokes the callback again, and requires `verified`,
+`verifier`, `source_digest`, `quote_digest`, and `evidence_digest` to match the
+routing attestation exactly. A missing or failing callback, an unverified or
+invalid return value, or any digest change falls back to the human queue before
+the target file is written. The default `workspace_file_quote` proof follows
+the same two-pass rule.
+
+The MCP `memory_propose` tool does not accept client identity, scopes,
+`verified`, verifier ids, or any other attestation field. Tool callers cannot
+select these injection points or promote proposal content into trusted
+context; only the process that constructs `MemdslMCPService` can do so.
+
+## Policy helpers
+
+```python
+target = store.validate_policy_target(policy, paths)
+fingerprint = workspace_fingerprint(paths, workspace=workspace)
+declaration = workspace.by_id("example.observation:phase")
+assert declaration is not None
+proof = verify_workspace_file_quote(declaration.evidence, paths)
+attested_context = context.with_evidence(proof)
+assessment = policy.assess(
+    declaration,
+    warnings_count=0,
+    context=attested_context,
+    auto_approved_today=0,
+    write_auto_granted=True,
+)
+```
+
+`ReviewPolicy.assess()` is deterministic and returns a
+`RoutingAssessment` with an `assessment_hash`, normalized
+`content_hash`, rule, reason codes, input snapshot, tier, and optional sample
+bucket. Policy rules can only narrow the built-in safety floor.
+
+`load_policy()` returns `None` only when no policy file exists. Malformed
+or unsafe configured policy raises `PolicyError`; callers must not silently
+convert that error to ordinary queueing.
+
+## Audit, digest, and statistics
+
+```python
+entries = store.audit_entries(strict=True)
+metadata = proposal_review_metadata(entries)
+digest = review_digest(entries)
+stats = review_stats(entries)
+
+post_review = record_post_review(
+    store,
+    result["proposal_id"],
+    verdict="confirm",  # or "flag"
+    reason="checked against the cited source",
+)
+```
+
+`audit_entries(strict=True)` raises `AuditLogError` with a line number when
+the append-only JSONL ledger is damaged. Reporting functions replay stored
+route snapshots and do not use the current `TypeRegistry` to reinterpret
+historical decisions.
+
+A post-review `flag` records a human quality result but does not edit source.
+Correction requires a new schema-valid declaration proposal whose
+`supersedes` relation points to the old declaration. Promotion and revision
+use the same append-only mechanism, optionally adding `revision_of`.
+
+ReviewStore does not create Git commits. Hosts may integrate Git, but atomic
+approval, audit replay, and correction semantics do not depend on it.
 
 ## Compatibility promise
 
-Patch releases in the 0.5 line will not remove these root exports or change
-the meaning of the five EvidencePack layers. New optional fields may be added
-to versioned payloads. Breaking schema changes require a new schema id.
+Patch releases in the 0.6 line will not remove these root exports or change
+the authority meaning of EvidencePack layers. `provisional` is additive to
+`memdsl.evidence_pack.v1`; breaking serialized schema changes require a new
+schema id.
