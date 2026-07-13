@@ -33,7 +33,7 @@ jobs:
         run: |
           python -m build
           python -m pip install --force-reinstall dist/*.whl
-          python -c "import memdsl; assert memdsl.__version__ == '0.5.0'; assert memdsl.EVIDENCE_PACK_SCHEMA == 'memdsl.evidence_pack.v1'"
+          python -c "import memdsl; assert memdsl.__version__ == '0.5.1'; assert memdsl.EVIDENCE_PACK_SCHEMA == 'memdsl.evidence_pack.v1'"
           python -m twine check dist/*
 
   mcp:
