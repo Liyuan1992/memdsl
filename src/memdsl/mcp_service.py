@@ -28,7 +28,13 @@ from memdsl.compliance import check_compliance
 from memdsl.linter import lint
 from memdsl.model import Workspace, Declaration
 from memdsl.parser import ParseError
-from memdsl.query import build_evidence_pack, explain as explain_text
+from memdsl.query import (
+    build_evidence_pack,
+    build_memory_map,
+    explain as explain_text,
+    render_memory_map_text,
+    workspace_vocabulary,
+)
 from memdsl.review import ReviewStore, staging_dir_for
 from memdsl.schema import SchemaError
 
@@ -45,11 +51,13 @@ QUERY_BOUNDARY = (
 
 RESOURCE_URIS = (
     "memdsl://status",
+    "memdsl://map",
     "memdsl://types",
     "memdsl://files",
 )
 
 TOOL_NAMES = (
+    "memory_map",
     "memory_query",
     "memory_check",
     "memory_types",
@@ -210,6 +218,36 @@ class MemdslMCPService:
             ),
         }
 
+    def memory_map(self) -> dict:
+        """Compact per-module index of all active memory, for session start."""
+        self.require_scope(SUMMARY_SCOPE)
+        schema = "memdsl.mcp.map.v1"
+        try:
+            ws = self.workspace()
+        except (ParseError, SchemaError) as exc:
+            return self._workspace_error(schema, exc)
+        map_data = build_memory_map(ws)
+        return {
+            "ok": True,
+            "schema_version": schema,
+            "status": "ok",
+            "declarations": map_data["declarations"],
+            "modules": map_data["modules"],
+            "vocabulary": map_data["vocabulary"],
+            "rendered_text": render_memory_map_text(map_data),
+            "boundary": (
+                "The map is a navigation index, not the memory itself: "
+                "claims are truncated and carry no evidence. Call "
+                "memory_explain (or read the .mem source) before citing or "
+                "acting on any item."
+            ),
+            "next_actions": [
+                "Keep this map in context and query with the map's own "
+                "nouns (subjects, scopes, module names).",
+                "Call memory_explain on an id for full evidence and relations.",
+            ],
+        }
+
     def query(
         self,
         query: str,
@@ -244,14 +282,15 @@ class MemdslMCPService:
         )
         pack_dict = pack.as_dict()
         matched = bool(pack_dict["must"] or pack_dict["should"] or pack_dict["context"])
-        next_actions = ["Call memory_explain on any [id] before citing it as evidence."]
+        next_actions = []
+        if matched:
+            next_actions.append(
+                "Call memory_explain on any [id] before citing it as evidence.")
         if pack_dict["missing"]:
             next_actions.append(
                 "MISSING lists known gaps and open issues; treat them as unknowns, not as absence of rules."
             )
-        if not matched:
-            next_actions.append("No match: call memory_list to browse declarations, then retry with concrete nouns.")
-        return {
+        payload = {
             "ok": True,
             "schema_version": schema,
             "status": "ok" if matched else "no_match",
@@ -260,6 +299,24 @@ class MemdslMCPService:
             "boundary": QUERY_BOUNDARY,
             "next_actions": next_actions,
         }
+        if not matched:
+            # A miss is a retry signal, not proof of absence: say what the
+            # filters hid and which vocabulary this workspace answers to.
+            excluded = pack.trace.get("excluded_by_filters_total", 0)
+            if excluded:
+                next_actions.append(
+                    f"{excluded} declaration(s) matched the query but were "
+                    "excluded by your types/subject filter; see "
+                    "evidence_pack.search_trace.excluded_by_filters and retry "
+                    "without the filter, or memory_explain those ids directly."
+                )
+            next_actions.append(
+                "No match: re-ask using this workspace's own vocabulary "
+                "(see vocabulary.subjects/aliases/scopes/types), or call "
+                "memory_list to browse declarations."
+            )
+            payload["vocabulary"] = workspace_vocabulary(ws)
+        return payload
 
     def explain(self, decl_id: str) -> dict:
         self.require_scope(SEARCH_SCOPE)

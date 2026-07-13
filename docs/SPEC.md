@@ -361,6 +361,38 @@ but must preserve the five layers and declaration ids.
 The reference scorer remains lexical plus alias resolution. Retrieval
 backends may be replaced without changing EvidencePack semantics.
 
+### 7.1 Retry guidance: search_trace
+
+A miss must be a retry signal, not a dead end. Serialized packs additively
+expose `search_trace`, which records how the query was interpreted and what
+the filters excluded:
+
+```text
+query_terms                 terms after stopword stripping
+matched_aliases             alias -> resolved symbols found in the query
+filters                     the type/subject filters that were applied
+candidates_considered       declarations scored after filtering
+hits                        declarations that scored above zero
+excluded_by_filters         matching declarations a filter hid (up to 5)
+excluded_by_filters_total   total count of filter-hidden matches
+```
+
+When a filter hides a matching declaration, the pack also reports it under
+MISSING instead of returning a silent no-match. Consumers should treat a
+no-match with non-empty `excluded_by_filters` as "the memory exists; the
+filter hid it".
+
+### 7.2 Navigation: memory map and vocabulary
+
+Agent-driven reading needs an index the agent can hold in context before it
+queries. `build_memory_map` produces a compact per-module index of every
+active declaration (id, type, runtime role, subject, scope, truncated claim)
+plus the workspace vocabulary (`subjects` with aliases, `scopes`, `modules`,
+`types`). `workspace_vocabulary` is also returned on no-match MCP queries so
+an agent can re-ask in the workspace's own words. The map is a navigation
+projection, never a citation source: items carry no evidence and claims are
+truncated.
+
 ## 8. CompliancePack
 
 `memdsl check` and MCP `memory_check` preflight a candidate against
@@ -443,8 +475,19 @@ MCP tool     memory_types
 MCP resource memdsl://types
 ```
 
+The memory itself is navigable through:
+
+```text
+Python       build_memory_map / workspace_vocabulary
+CLI          memdsl map <workspace> [--json]
+MCP tool     memory_map
+MCP resource memdsl://map
+```
+
 Agents should inspect loaded types before proposing memory instead of
-inventing a standard taxonomy.
+inventing a standard taxonomy, and read the memory map at session start so
+retrieval starts from knowledge of what exists rather than from a blind
+similarity guess.
 
 ## 12. Compliance evaluation
 

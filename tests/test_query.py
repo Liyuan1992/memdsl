@@ -1,6 +1,13 @@
 from memdsl.model import Workspace
 from memdsl.parser import parse_text
-from memdsl.query import EVIDENCE_PACK_SCHEMA, build_evidence_pack, explain
+from memdsl.query import (
+    EVIDENCE_PACK_SCHEMA,
+    build_evidence_pack,
+    build_memory_map,
+    explain,
+    render_memory_map_text,
+    workspace_vocabulary,
+)
 
 SOURCE = """
 module self
@@ -133,3 +140,54 @@ def test_query_json_roundtrip():
     assert data["query"] == "morning schedule"
     assert isinstance(data["must"], list)
     assert all("matched_terms" in item for item in data["context"])
+
+
+def test_search_trace_reports_query_interpretation():
+    pack = build_evidence_pack(make_ws(), "how is my day job going")
+    trace = pack.trace
+    assert "day" in trace["query_terms"] and "job" in trace["query_terms"]
+    assert trace["matched_aliases"]["day job"] == ["User.DayJob"]
+    assert trace["hits"] >= 1
+    assert trace["excluded_by_filters_total"] == 0
+    assert pack.as_dict()["search_trace"] == trace
+
+
+def test_filter_exclusions_fail_loud_instead_of_silent_no_match():
+    # The right memory exists, but the caller's type filter hides it. The
+    # miss must say so instead of looking identical to genuine absence.
+    pack = build_evidence_pack(
+        make_ws(), "meetings before ten", kinds=["state"])
+    assert not pack.must and not pack.should and not pack.context
+    trace = pack.trace
+    assert trace["filters"]["types"] == ["state"]
+    assert trace["excluded_by_filters_total"] >= 1
+    excluded_ids = [e["id"] for e in trace["excluded_by_filters"]]
+    assert "boundary:schedule.no_meetings_before_10" in excluded_ids
+    assert any("excluded by type/subject filters" in m for m in pack.missing)
+
+
+def test_workspace_vocabulary_lists_the_words_a_workspace_speaks():
+    vocab = workspace_vocabulary(make_ws())
+    symbols = {s["symbol"] for s in vocab["subjects"]}
+    assert {"User", "User.DayJob"} <= symbols
+    dayjob = next(s for s in vocab["subjects"] if s["symbol"] == "User.DayJob")
+    assert "day job" in dayjob["aliases"]
+    assert "scheduling" in vocab["scopes"]
+    assert "self" in vocab["modules"]
+    assert vocab["types"]["boundary"] == 1
+
+
+def test_memory_map_indexes_active_memory_per_module():
+    map_data = build_memory_map(make_ws())
+    assert map_data["declarations"] == 6
+    module = next(m for m in map_data["modules"] if m["module"] == "self")
+    ids = [item["id"] for item in module["items"]]
+    assert "entity:User" in ids
+    assert "boundary:schedule.no_meetings_before_10" in ids
+    # inactive memory stays out of the map
+    assert "state:dayjob.old_load" not in ids
+    text = render_memory_map_text(map_data)
+    assert "# memory map" in text
+    assert "[boundary:schedule.no_meetings_before_10]" in text
+    assert "## vocabulary" in text
+    assert "day job" in text

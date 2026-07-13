@@ -11,12 +11,19 @@ CompliancePacks (ALLOW / BLOCK / NEEDS_REVIEW).
 from memdsl.parser import parse_file, parse_text, ParseError
 from memdsl.model import Workspace, Declaration
 from memdsl.linter import lint
-from memdsl.query import EVIDENCE_PACK_SCHEMA, build_evidence_pack, EvidencePack
+from memdsl.query import (
+    EVIDENCE_PACK_SCHEMA,
+    EvidencePack,
+    build_evidence_pack,
+    build_memory_map,
+    render_memory_map_text,
+    workspace_vocabulary,
+)
 from memdsl.compliance import check_compliance, CompliancePack
 from memdsl.review import Proposal, ReviewStore, ValidationResult, staging_dir_for
 from memdsl.schema import SchemaError, TypeDescriptor, TypeRegistry
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 __all__ = [
     "parse_file",
@@ -26,6 +33,9 @@ __all__ = [
     "Declaration",
     "lint",
     "build_evidence_pack",
+    "build_memory_map",
+    "render_memory_map_text",
+    "workspace_vocabulary",
     "EvidencePack",
     "EVIDENCE_PACK_SCHEMA",
     "check_compliance",

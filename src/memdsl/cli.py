@@ -1,6 +1,7 @@
 """memdsl command-line interface.
 
     memdsl lint PATH...              lint memory source files
+    memdsl map PATH...               compact per-module index of a workspace
     memdsl query PATH... -q TEXT     build an evidence pack for a query
     memdsl check PATH...             preflight a draft against MUST rules
     memdsl explain PATH... ID        show one declaration with relations
@@ -25,7 +26,12 @@ from memdsl.compliance import check_compliance
 from memdsl.linter import has_errors, lint
 from memdsl.model import Workspace
 from memdsl.parser import ParseError
-from memdsl.query import build_evidence_pack, explain
+from memdsl.query import (
+    build_evidence_pack,
+    build_memory_map,
+    explain,
+    render_memory_map_text,
+)
 from memdsl.review import ReviewStore, staging_dir_for
 from memdsl.schema import SchemaError
 
@@ -56,6 +62,11 @@ def main(argv: List[str] = None) -> int:
     p_lint.add_argument("paths", nargs="+", help=".mem files or directories")
     p_lint.add_argument("--strict", action="store_true",
                         help="exit non-zero on warnings too")
+
+    p_map = sub.add_parser(
+        "map", help="compact per-module index of a workspace")
+    p_map.add_argument("paths", nargs="+", help=".mem files or directories")
+    p_map.add_argument("--json", action="store_true", help="JSON output")
 
     p_query = sub.add_parser("query", help="query memory into an evidence pack")
     p_query.add_argument("paths", nargs="+", help=".mem files or directories")
@@ -147,6 +158,17 @@ def main(argv: List[str] = None) -> int:
               f"{errors} error(s), {warnings} warning(s)")
         if has_errors(diags) or (args.strict and warnings):
             return 1
+        return 0
+
+    if args.command == "map":
+        ws = _load(args.paths)
+        map_data = build_memory_map(ws)
+        if args.json:
+            print(json.dumps(
+                {"schema_version": "memdsl.map.v1", **map_data},
+                indent=2, ensure_ascii=False))
+        else:
+            print(render_memory_map_text(map_data))
         return 0
 
     if args.command == "query":
