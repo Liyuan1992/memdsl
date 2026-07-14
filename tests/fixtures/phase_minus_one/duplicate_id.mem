@@ -1,0 +1,13 @@
+module phase_minus_one.identity
+
+fact duplicate.item {
+  claim: "First synthetic occurrence."
+  lifecycle { status: active }
+  evidence { source: synthetic_log quote: "First occurrence." }
+}
+
+fact duplicate.item {
+  claim: "Second synthetic occurrence."
+  lifecycle { status: active }
+  evidence { source: synthetic_log quote: "Second occurrence." }
+}

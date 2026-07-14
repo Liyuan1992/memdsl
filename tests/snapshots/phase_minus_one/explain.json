@@ -1,0 +1,49 @@
+{
+  "ok": true,
+  "schema_version": "memdsl.mcp.explain.v1",
+  "status": "ok",
+  "declaration": {
+    "id": "boundary:safety.no_ember",
+    "type": "boundary",
+    "kind": "boundary",
+    "runtime_role": "constraint",
+    "capabilities": [
+      "enforceable",
+      "exceptions_recommended",
+      "guardable",
+      "requires_evidence",
+      "searchable"
+    ],
+    "name": "safety.no_ember",
+    "module": "phase_minus_one.baseline",
+    "status": "active",
+    "subject": "Synthetic.Project",
+    "force": "hard",
+    "scope": "global",
+    "confidence": null,
+    "lifecycle": {"status": "active"},
+    "access_policy": {},
+    "claim": "Never publish the synthetic ember token.",
+    "file": "<phase-minus-one/baseline.mem>",
+    "line": 9,
+    "relations": {},
+    "referenced_by": [
+      {"id": "fact:project.release_note", "relation": "supports"}
+    ],
+    "evidence": {
+      "source": "synthetic_policy",
+      "quote": "The ember token stays private."
+    },
+    "fields": {
+      "subject": "Synthetic.Project",
+      "rule": "Never publish the synthetic ember token.",
+      "force": "hard",
+      "scope": "global",
+      "exceptions": [],
+      "lifecycle": {"status": "active"},
+      "guard": {"deny_any": ["ember-token"]}
+    }
+  },
+  "rendered_text": "boundary:safety.no_ember\n  file:    <phase-minus-one/baseline.mem>:9\n  module:  phase_minus_one.baseline\n  type:    boundary\n  role:    constraint\n  status:  active\n  subject: Synthetic.Project\n  force:   hard\n  scope:   global\n  claim:   Never publish the synthetic ember token.\n  referenced by:\n    fact:project.release_note --supports--> this\n  evidence:\n    source: synthetic_policy\n    quote: The ember token stays private.",
+  "boundary": "evidence.quote and source anchor this declaration to its origin; cite the declaration id, do not paraphrase it as your own inference."
+}

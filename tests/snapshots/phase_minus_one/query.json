@@ -1,0 +1,114 @@
+{
+  "ok": true,
+  "schema_version": "memdsl.mcp.query.v1",
+  "status": "ok",
+  "evidence_pack": {
+    "schema_version": "memdsl.evidence_pack.v1",
+    "query": "lantern release",
+    "resolved_subjects": ["Synthetic.Project"],
+    "must": [
+      {
+        "id": "boundary:safety.no_ember",
+        "type": "boundary",
+        "kind": "boundary",
+        "runtime_role": "constraint",
+        "capabilities": [
+          "enforceable",
+          "exceptions_recommended",
+          "guardable",
+          "requires_evidence",
+          "searchable"
+        ],
+        "claim": "Never publish the synthetic ember token.",
+        "force": "hard",
+        "scope": "global",
+        "subject": "Synthetic.Project",
+        "confidence": null,
+        "lifecycle": {"status": "active"},
+        "access_policy": {},
+        "status": "active",
+        "file": "<phase-minus-one/baseline.mem>",
+        "line": 9,
+        "evidence": {
+          "source": "synthetic_policy",
+          "quote": "The ember token stays private."
+        }
+      }
+    ],
+    "should": [],
+    "context": [
+      {
+        "id": "fact:project.release_note",
+        "type": "fact",
+        "kind": "fact",
+        "runtime_role": "assertion",
+        "capabilities": ["requires_evidence", "searchable"],
+        "claim": "The lantern release uses synthetic blue markers.",
+        "force": null,
+        "scope": "project_lantern",
+        "subject": "Synthetic.Project",
+        "confidence": "high",
+        "lifecycle": {"status": "active"},
+        "access_policy": {},
+        "status": "active",
+        "file": "<phase-minus-one/baseline.mem>",
+        "line": 23,
+        "evidence": {
+          "source": "synthetic_report",
+          "quote": "Blue markers were used in the fictional release."
+        },
+        "score": 4.25,
+        "matched_terms": [
+          "lantern",
+          "release",
+          "subject:Synthetic.Project"
+        ]
+      }
+    ],
+    "provisional": [
+      {
+        "id": "fact:project.draft_note",
+        "type": "fact",
+        "kind": "fact",
+        "runtime_role": "assertion",
+        "capabilities": ["requires_evidence", "searchable"],
+        "claim": "A provisional lantern release note is awaiting review.",
+        "force": null,
+        "scope": "project_lantern",
+        "subject": "Synthetic.Project",
+        "confidence": null,
+        "lifecycle": {"status": "candidate"},
+        "access_policy": {},
+        "status": "candidate",
+        "file": "<phase-minus-one/baseline.mem>",
+        "line": 36,
+        "evidence": {
+          "source": "synthetic_draft",
+          "quote": "This fictional note is unconfirmed."
+        },
+        "score": 4.0,
+        "matched_terms": [
+          "lantern",
+          "release",
+          "subject:Synthetic.Project"
+        ]
+      }
+    ],
+    "conflicts": [],
+    "missing": [],
+    "search_trace": {
+      "query_terms": ["lantern", "release"],
+      "matched_aliases": {"lantern": ["Synthetic.Project"]},
+      "filters": {"types": null, "subject": null},
+      "candidates_considered": 3,
+      "hits": 3,
+      "excluded_by_filters_total": 0,
+      "excluded_by_filters": []
+    }
+  },
+  "rendered_text": "# resolved subjects: Synthetic.Project\nMUST\n- [boundary:safety.no_ember] Never publish the synthetic ember token. (exceptions: []) [status=active; runtime_role=constraint; lifecycle={\"status\":\"active\"}]\n\nSHOULD\n- (none)\n\nCONTEXT\n- [fact:project.release_note] The lantern release uses synthetic blue markers. [status=active; runtime_role=assertion; lifecycle={\"status\":\"active\"}]\n\nPROVISIONAL\n- [fact:project.draft_note] A provisional lantern release note is awaiting review. [status=candidate; runtime_role=assertion; lifecycle={\"status\":\"candidate\"}]",
+  "boundary": "MUST items are active hard rules to enforce, not context to weigh. SHOULD and CONTEXT contain active guidance and assertions. PROVISIONAL items are non-active, unconfirmed candidates and never carry MUST, SHOULD, CONTEXT, MISSING, or compliance authority. Surface CONFLICT items instead of silently resolving them.",
+  "next_actions": [
+    "Call memory_explain on any [id] before citing it as evidence."
+  ]
+}

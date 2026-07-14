@@ -1,0 +1,21 @@
+module phase_minus_one.revisions
+
+fact topic.old {
+  claim: "The old synthetic route is blue."
+  lifecycle { status: active }
+  evidence { source: synthetic_log quote: "Old blue route." }
+}
+
+fact topic.left {
+  claim: "The left synthetic route is green."
+  lifecycle { status: active }
+  relations { supersedes: topic.old }
+  evidence { source: synthetic_log quote: "Left green route." }
+}
+
+fact topic.right {
+  claim: "The right synthetic route is amber."
+  lifecycle { status: active }
+  relations { supersedes: topic.old }
+  evidence { source: synthetic_log quote: "Right amber route." }
+}

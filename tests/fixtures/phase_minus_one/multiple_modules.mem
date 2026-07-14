@@ -1,0 +1,15 @@
+module phase_minus_one.first
+
+fact module.first_item {
+  claim: "Declared after the first module statement."
+  lifecycle { status: active }
+  evidence { source: synthetic_log quote: "First module item." }
+}
+
+module phase_minus_one.second
+
+fact module.second_item {
+  claim: "Declared after the second module statement."
+  lifecycle { status: active }
+  evidence { source: synthetic_log quote: "Second module item." }
+}

@@ -1,0 +1,15 @@
+module phase_minus_one.revisions
+
+fact topic.alpha {
+  claim: "Synthetic alpha route."
+  lifecycle { status: active }
+  relations { supersedes: topic.beta }
+  evidence { source: synthetic_log quote: "Alpha." }
+}
+
+fact topic.beta {
+  claim: "Synthetic beta route."
+  lifecycle { status: active }
+  relations { supersedes: topic.alpha }
+  evidence { source: synthetic_log quote: "Beta." }
+}

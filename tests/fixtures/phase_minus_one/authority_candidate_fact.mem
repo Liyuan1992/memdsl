@@ -1,0 +1,16 @@
+module phase_minus_one.authority
+
+fact topic.current {
+  claim: "The synthetic beacon is active."
+  scope: synthetic
+  lifecycle { status: active }
+  evidence { source: synthetic_log quote: "Beacon active." }
+}
+
+fact topic.draft_override {
+  claim: "An unconfirmed beacon override exists."
+  scope: synthetic
+  lifecycle { status: candidate }
+  relations { supersedes: topic.current }
+  evidence { source: synthetic_draft quote: "Draft only." }
+}

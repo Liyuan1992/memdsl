@@ -1,0 +1,19 @@
+module phase_minus_one.authority
+
+boundary safety.no_ember {
+  rule: "Never emit the synthetic ember token."
+  force: hard
+  scope: global
+  exceptions: []
+  lifecycle { status: active }
+  guard { deny_any: [ember-token] }
+  evidence { source: synthetic_policy quote: "No ember token." }
+}
+
+fact safety.draft_override {
+  claim: "An unconfirmed override for the ember rule."
+  scope: synthetic
+  lifecycle { status: candidate }
+  relations { supersedes: safety.no_ember }
+  evidence { source: synthetic_draft quote: "Draft override." }
+}

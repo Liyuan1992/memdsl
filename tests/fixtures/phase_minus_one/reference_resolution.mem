@@ -1,0 +1,40 @@
+module phase_minus_one.references
+
+fact shared {
+  claim: "Synthetic fact sharing a bare name."
+  lifecycle { status: active }
+  evidence { source: synthetic_log quote: "Shared fact." }
+}
+
+decision shared {
+  decision: "Synthetic decision sharing a bare name."
+  lifecycle { status: active }
+  evidence { source: synthetic_log quote: "Shared decision." }
+}
+
+fact bare.successor {
+  claim: "Successor using an ambiguous bare reference."
+  lifecycle { status: active }
+  relations { supersedes: shared }
+  evidence { source: synthetic_log quote: "Bare successor." }
+}
+
+fact prefix.target {
+  claim: "Target of a wrongly prefixed reference."
+  lifecycle { status: active }
+  evidence { source: synthetic_log quote: "Prefix target." }
+}
+
+fact prefix.successor {
+  claim: "Successor with the wrong kind prefix."
+  lifecycle { status: active }
+  relations { supersedes: "boundary:prefix.target" }
+  evidence { source: synthetic_log quote: "Wrong prefix." }
+}
+
+fact typo.source {
+  claim: "Source with a misspelled relation key."
+  lifecycle { status: active }
+  relations { supercedes: prefix.target }
+  evidence { source: synthetic_log quote: "Typo relation." }
+}

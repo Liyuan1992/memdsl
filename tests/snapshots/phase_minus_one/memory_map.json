@@ -1,0 +1,70 @@
+{
+  "ok": true,
+  "schema_version": "memdsl.mcp.map.v1",
+  "status": "ok",
+  "declarations": 4,
+  "modules": [
+    {
+      "module": "phase_minus_one.baseline",
+      "declarations": 4,
+      "items": [
+        {
+          "id": "entity:Synthetic.Project",
+          "type": "entity",
+          "runtime_role": "symbol",
+          "status": "active",
+          "lifecycle": {"status": "active"},
+          "summary": "\"Project Lantern\"; aliases: lantern, blue lantern"
+        },
+        {
+          "id": "boundary:safety.no_ember",
+          "type": "boundary",
+          "runtime_role": "constraint",
+          "status": "active",
+          "lifecycle": {"status": "active"},
+          "subject": "Synthetic.Project",
+          "scope": "global",
+          "summary": "Never publish the synthetic ember token."
+        },
+        {
+          "id": "fact:project.release_note",
+          "type": "fact",
+          "runtime_role": "assertion",
+          "status": "active",
+          "lifecycle": {"status": "active"},
+          "subject": "Synthetic.Project",
+          "scope": "project_lantern",
+          "summary": "The lantern release uses synthetic blue markers."
+        },
+        {
+          "id": "fact:project.draft_note",
+          "type": "fact",
+          "runtime_role": "assertion",
+          "status": "candidate",
+          "lifecycle": {"status": "candidate"},
+          "subject": "Synthetic.Project",
+          "scope": "project_lantern",
+          "summary": "A provisional lantern release note is awaiting review."
+        }
+      ]
+    }
+  ],
+  "vocabulary": {
+    "subjects": [
+      {
+        "symbol": "Synthetic.Project",
+        "canonical_name": "Project Lantern",
+        "aliases": ["lantern", "blue lantern"]
+      }
+    ],
+    "scopes": ["global", "project_lantern"],
+    "modules": ["phase_minus_one.baseline"],
+    "types": {"boundary": 1, "entity": 1, "fact": 2}
+  },
+  "rendered_text": "# memory map: 4 declaration(s) in 1 module(s)\n\n## module phase_minus_one.baseline\n- [entity:Synthetic.Project] symbol [status=active; lifecycle={\"status\":\"active\"}]: \"Project Lantern\"; aliases: lantern, blue lantern\n- [boundary:safety.no_ember] constraint [status=active; lifecycle={\"status\":\"active\"}] (subject Synthetic.Project, scope global): Never publish the synthetic ember token.\n- [fact:project.release_note] assertion [status=active; lifecycle={\"status\":\"active\"}] (subject Synthetic.Project, scope project_lantern): The lantern release uses synthetic blue markers.\n- [fact:project.draft_note] assertion [status=candidate; lifecycle={\"status\":\"candidate\"}] (subject Synthetic.Project, scope project_lantern): A provisional lantern release note is awaiting review.\n\n## vocabulary\nsubjects: Synthetic.Project (aka Project Lantern, lantern, blue lantern)\nscopes: global, project_lantern\ntypes: boundary(1), entity(1), fact(2)",
+  "boundary": "The map is a navigation index, not the memory itself: claims are truncated and carry no evidence. Call memory_explain (or read the .mem source) before citing or acting on any item.",
+  "next_actions": [
+    "Keep this map in context and query with the map's own nouns (subjects, scopes, module names).",
+    "Call memory_explain on an id for full evidence and relations."
+  ]
+}

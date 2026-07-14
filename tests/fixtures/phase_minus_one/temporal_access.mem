@@ -1,0 +1,18 @@
+module phase_minus_one.serving
+
+state expired.owner_only {
+  claim: "The synthetic lantern was red before expiry."
+  scope: synthetic
+  lifecycle {
+    status: active
+    as_of: 2025-01-01
+    valid_until: 2025-02-01
+  }
+  access_policy {
+    readers: [owner]
+    writers: [owner]
+    reviewers: [owner]
+    export: denied
+  }
+  evidence { source: synthetic_log quote: "Lantern was red." }
+}

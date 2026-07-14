@@ -1,0 +1,305 @@
+{
+  "schema_version": "memdsl.synthetic_scale_baseline.v1",
+  "generated_at_utc": "2026-07-14T04:25:41.005401+00:00",
+  "baseline": {
+    "memdsl_version": "0.6.0",
+    "source_commit": "72274d9d4f065b76bceaf30f529dcbd47b3f3e18",
+    "runtime_semantics": "unmodified memdsl 0.6.0"
+  },
+  "environment": {
+    "python": "3.12.10",
+    "implementation": "CPython",
+    "system": "Windows",
+    "release": "11",
+    "machine": "AMD64"
+  },
+  "method": {
+    "fixture": "deterministic in-memory fictional .mem source",
+    "workspace_reads": 0,
+    "repeats": 5,
+    "timing": "time.perf_counter wall time per operation",
+    "memory": "tracemalloc peak allocated bytes per operation",
+    "payload": "compact sorted UTF-8 JSON bytes of the current MCP payload",
+    "query": "synthetic beacon",
+    "query_limit": 8,
+    "explain_id": "fact:root.target"
+  },
+  "results": [
+    {
+      "declarations": 100,
+      "source_bytes": 22479,
+      "source_sha256": "1ed146fdca5a6d2b20aec6ac698218fcee6a9706cdefd089d3ee1dec26169b49",
+      "parse": {
+        "elapsed_ms": [
+          27.891,
+          27.686,
+          29.402,
+          31.284,
+          29.349
+        ],
+        "peak_mib": [
+          0.484,
+          0.478,
+          0.478,
+          0.478,
+          0.478
+        ],
+        "median_elapsed_ms": 29.349,
+        "min_elapsed_ms": 27.686,
+        "max_elapsed_ms": 31.284,
+        "median_peak_mib": 0.478
+      },
+      "map": {
+        "elapsed_ms": [
+          2.204,
+          2.333,
+          2.215,
+          2.17,
+          2.682
+        ],
+        "peak_mib": [
+          0.081,
+          0.081,
+          0.081,
+          0.081,
+          0.081
+        ],
+        "median_elapsed_ms": 2.215,
+        "min_elapsed_ms": 2.17,
+        "max_elapsed_ms": 2.682,
+        "median_peak_mib": 0.081,
+        "payload_bytes": 31478,
+        "returned_declarations": 100
+      },
+      "query": {
+        "elapsed_ms": [
+          2.625,
+          2.545,
+          3.186,
+          2.721,
+          2.604
+        ],
+        "peak_mib": [
+          0.048,
+          0.045,
+          0.045,
+          0.045,
+          0.045
+        ],
+        "median_elapsed_ms": 2.625,
+        "min_elapsed_ms": 2.545,
+        "max_elapsed_ms": 3.186,
+        "median_peak_mib": 0.045,
+        "payload_bytes": 5783,
+        "returned_context": 8,
+        "candidates_considered": 100
+      },
+      "explain": {
+        "elapsed_ms": [
+          1.628,
+          1.693,
+          1.678,
+          1.617,
+          1.685
+        ],
+        "peak_mib": [
+          0.04,
+          0.04,
+          0.04,
+          0.04,
+          0.04
+        ],
+        "median_elapsed_ms": 1.678,
+        "min_elapsed_ms": 1.617,
+        "max_elapsed_ms": 1.693,
+        "median_peak_mib": 0.04,
+        "payload_bytes": 10157,
+        "incoming_references": 99
+      }
+    },
+    {
+      "declarations": 1000,
+      "source_bytes": 224979,
+      "source_sha256": "68eb22a433900b8f81ed5a968587befa401adff045811ae9ee5758186c05911e",
+      "parse": {
+        "elapsed_ms": [
+          304.898,
+          326.724,
+          312.728,
+          315.578,
+          336.051
+        ],
+        "peak_mib": [
+          4.739,
+          4.739,
+          4.739,
+          4.739,
+          4.739
+        ],
+        "median_elapsed_ms": 315.578,
+        "min_elapsed_ms": 304.898,
+        "max_elapsed_ms": 336.051,
+        "median_peak_mib": 4.739
+      },
+      "map": {
+        "elapsed_ms": [
+          25.454,
+          25.912,
+          26.038,
+          24.613,
+          25.752
+        ],
+        "peak_mib": [
+          0.784,
+          0.784,
+          0.784,
+          0.784,
+          0.784
+        ],
+        "median_elapsed_ms": 25.752,
+        "min_elapsed_ms": 24.613,
+        "max_elapsed_ms": 26.038,
+        "median_peak_mib": 0.784,
+        "payload_bytes": 307783,
+        "returned_declarations": 1000
+      },
+      "query": {
+        "elapsed_ms": [
+          29.226,
+          33.151,
+          25.928,
+          25.496,
+          25.93
+        ],
+        "peak_mib": [
+          0.392,
+          0.392,
+          0.392,
+          0.392,
+          0.392
+        ],
+        "median_elapsed_ms": 25.93,
+        "min_elapsed_ms": 25.496,
+        "max_elapsed_ms": 33.151,
+        "median_peak_mib": 0.392,
+        "payload_bytes": 5792,
+        "returned_context": 8,
+        "candidates_considered": 1000
+      },
+      "explain": {
+        "elapsed_ms": [
+          19.603,
+          19.999,
+          17.757,
+          18.049,
+          18.037
+        ],
+        "peak_mib": [
+          0.373,
+          0.373,
+          0.373,
+          0.373,
+          0.373
+        ],
+        "median_elapsed_ms": 18.049,
+        "min_elapsed_ms": 17.757,
+        "max_elapsed_ms": 19.999,
+        "median_peak_mib": 0.373,
+        "payload_bytes": 92059,
+        "incoming_references": 999
+      }
+    },
+    {
+      "declarations": 10000,
+      "source_bytes": 2249979,
+      "source_sha256": "b8ddc894a497bfb3168cdf1a63f68cedf8400281e65ae3368a3392d51091e452",
+      "parse": {
+        "elapsed_ms": [
+          3183.605,
+          3619.918,
+          3348.264,
+          3303.925,
+          3431.354
+        ],
+        "peak_mib": [
+          47.162,
+          47.162,
+          47.162,
+          47.162,
+          47.162
+        ],
+        "median_elapsed_ms": 3348.264,
+        "min_elapsed_ms": 3183.605,
+        "max_elapsed_ms": 3619.918,
+        "median_peak_mib": 47.162
+      },
+      "map": {
+        "elapsed_ms": [
+          325.906,
+          293.974,
+          270.501,
+          253.381,
+          275.769
+        ],
+        "peak_mib": [
+          7.813,
+          7.813,
+          7.813,
+          7.813,
+          7.813
+        ],
+        "median_elapsed_ms": 275.769,
+        "min_elapsed_ms": 253.381,
+        "max_elapsed_ms": 325.906,
+        "median_peak_mib": 7.813,
+        "payload_bytes": 3070788,
+        "returned_declarations": 10000
+      },
+      "query": {
+        "elapsed_ms": [
+          279.968,
+          279.193,
+          323.29,
+          313.67,
+          296.163
+        ],
+        "peak_mib": [
+          3.846,
+          3.846,
+          3.846,
+          3.846,
+          3.846
+        ],
+        "median_elapsed_ms": 296.163,
+        "min_elapsed_ms": 279.193,
+        "max_elapsed_ms": 323.29,
+        "median_peak_mib": 3.846,
+        "payload_bytes": 5801,
+        "returned_context": 8,
+        "candidates_considered": 10000
+      },
+      "explain": {
+        "elapsed_ms": [
+          200.916,
+          202.175,
+          214.425,
+          205.922,
+          178.493
+        ],
+        "peak_mib": [
+          3.703,
+          3.703,
+          3.703,
+          3.703,
+          3.703
+        ],
+        "median_elapsed_ms": 202.175,
+        "min_elapsed_ms": 178.493,
+        "max_elapsed_ms": 214.425,
+        "median_peak_mib": 3.703,
+        "payload_bytes": 911061,
+        "incoming_references": 9999
+      }
+    }
+  ]
+}

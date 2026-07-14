@@ -1,0 +1,45 @@
+module phase_minus_one.baseline
+
+entity Synthetic.Project {
+  canonical_name: "Project Lantern"
+  aliases: [lantern, "blue lantern"]
+  lifecycle { status: active }
+}
+
+boundary safety.no_ember {
+  subject: Synthetic.Project
+  rule: "Never publish the synthetic ember token."
+  force: hard
+  scope: global
+  exceptions: []
+  lifecycle { status: active }
+  guard { deny_any: [ember-token] }
+  evidence {
+    source: synthetic_policy
+    quote: "The ember token stays private."
+  }
+}
+
+fact project.release_note {
+  subject: Synthetic.Project
+  claim: "The lantern release uses synthetic blue markers."
+  scope: project_lantern
+  confidence: high
+  lifecycle { status: active }
+  relations { supports: safety.no_ember }
+  evidence {
+    source: synthetic_report
+    quote: "Blue markers were used in the fictional release."
+  }
+}
+
+fact project.draft_note {
+  subject: Synthetic.Project
+  claim: "A provisional lantern release note is awaiting review."
+  scope: project_lantern
+  lifecycle { status: candidate }
+  evidence {
+    source: synthetic_draft
+    quote: "This fictional note is unconfirmed."
+  }
+}
