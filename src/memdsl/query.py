@@ -212,13 +212,12 @@ def _active_alias_map(ws: Workspace) -> Dict[str, List[str]]:
     a query or activate constraints before human confirmation. Keep this
     filter local so the older Workspace.alias_map() API retains its behavior.
     """
-    superseded = ws.superseded_ids()
+    suppressed = ws.supersession_suppressor()
     amap: Dict[str, List[str]] = {}
     for decl in ws.active():
         if (decl.runtime_role != "symbol"
                 or decl.status != "active"
-                or decl.id in superseded
-                or decl.name in superseded):
+                or suppressed(decl)):
             continue
         aliases = decl.fields.get("aliases", [])
         if not isinstance(aliases, list):
@@ -251,13 +250,13 @@ def build_evidence_pack(
         subject_hits.append(subject)
     pack.resolved_subjects = sorted(set(subject_hits))
 
-    superseded = ws.superseded_ids()
+    suppressed = ws.supersession_suppressor()
     type_filter = types if types is not None else kinds
     pool = [
         d for d in ws.active()
         if d.runtime_role != "symbol"
         and d.has_capability("searchable")
-        and d.id not in superseded and d.name not in superseded
+        and not suppressed(d)
     ]
     candidates = [
         d for d in pool
@@ -310,7 +309,7 @@ def build_evidence_pack(
     for d in ws.active():
         if d.runtime_role != "constraint" or d.status != "active":
             continue
-        if d.id in superseded or d.name in superseded:
+        if suppressed(d):
             continue
         relevant = (
             d.id in hit_ids
@@ -438,11 +437,11 @@ def build_memory_map(ws: Workspace, claim_chars: int = 120) -> dict:
     provisional memory cannot masquerade as active authority. Claims are
     truncated and carry no evidence: the map is for navigation, not citation.
     """
-    superseded = ws.superseded_ids()
+    suppressed = ws.supersession_suppressor()
     modules: Dict[str, List[dict]] = {}
     total = 0
     for d in ws.active():
-        if d.id in superseded or d.name in superseded:
+        if suppressed(d):
             continue
         entry: dict = {"id": d.id, "type": d.kind,
                        "runtime_role": d.runtime_role,

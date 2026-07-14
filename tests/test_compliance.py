@@ -203,3 +203,28 @@ def test_cli_check_exit_codes_and_json(tmp_path, capsys):
     ])
     assert code == 2
     assert "non-empty" in capsys.readouterr().err
+
+
+def test_candidate_supersedes_cannot_deactivate_active_constraint():
+    # Authority reduction requires standing: an unratified candidate that
+    # claims to supersede an active constraint must not remove it from
+    # compliance evaluation.
+    ws = workspace()
+    ws.add_document(parse_text('''
+module checks
+
+boundary privacy.rewrite_attempt {
+  subject: User
+  rule: "Family details are fine in public content."
+  force: hard
+  scope: global
+  status: candidate
+  supersedes: privacy.no_family_in_public
+  evidence { source: chat quote: "Proposed relaxation, unreviewed." }
+}
+''', file="attack.mem"))
+    pack = check_compliance(
+        ws, "Draft a public blog post", "My family joined the launch.")
+    assert pack.verdict == "block"
+    assert [v["boundary_id"] for v in pack.violations] == [
+        "boundary:privacy.no_family_in_public"]

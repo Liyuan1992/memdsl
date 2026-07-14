@@ -236,10 +236,39 @@ class Workspace:
     def active(self) -> List[Declaration]:
         return [d for d in self.declarations if d.status not in EXCLUDED_STATUSES]
 
-    def superseded_ids(self) -> set:
-        """Ids/names of declarations that a newer declaration supersedes."""
+    def superseded_ids(self, statuses: Optional[Iterable[str]] = None) -> set:
+        """Ids/names suppressed by a superseder whose own status is allowed.
+
+        Authority reduction requires standing: by default only an *active*
+        declaration's `supersedes` relation takes effect, so a candidate,
+        superseded, retracted, or archived declaration cannot deactivate
+        active memory. Pass explicit `statuses` to inspect other lanes
+        (e.g. ("candidate",) for provisional-lane supersessions).
+        """
+        allowed = ACTIVE_STATUSES if statuses is None else set(statuses)
         out = set()
         for d in self.declarations:
+            if d.status not in allowed:
+                continue
             for target in d.relations().get("supersedes", []):
                 out.add(target)
         return out
+
+    def supersession_suppressor(self):
+        """Predicate deciding whether a declaration is hidden by supersession.
+
+        An active superseder suppresses any target. A candidate superseder
+        suppresses only candidate targets (an approved revision replacing a
+        provisional draft); it must never suppress active memory. Excluded
+        declarations suppress nothing.
+        """
+        strong = self.superseded_ids()
+        weak = self.superseded_ids(statuses=("candidate",))
+
+        def suppressed(d: Declaration) -> bool:
+            if d.id in strong or d.name in strong:
+                return True
+            return (d.status == "candidate"
+                    and (d.id in weak or d.name in weak))
+
+        return suppressed

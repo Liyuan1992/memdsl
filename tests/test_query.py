@@ -495,3 +495,74 @@ fact draft.map_entry {
     text = render_memory_map_text(map_data)
     assert "status=candidate" in text
     assert 'lifecycle={"as_of":"2026-07-14","status":"candidate"}' in text
+
+
+def test_non_active_supersedes_cannot_suppress_active_memory():
+    # An unratified (candidate) declaration claiming `supersedes` must not
+    # deactivate active memory in the map, the query pool, or MUST.
+    def ws_with_superseder(status):
+        ws = Workspace()
+        ws.add_document(parse_text(f'''
+entity User {{
+  status: active
+}}
+
+boundary schedule.protect_focus {{
+  subject: User
+  rule: "Keep mornings free for focus work."
+  force: hard
+  scope: scheduling
+  status: active
+  evidence {{ source: chat quote: "Guard my mornings." }}
+}}
+
+boundary schedule.rewrite_attempt {{
+  subject: User
+  rule: "Mornings are open for meetings."
+  force: hard
+  scope: scheduling
+  status: {status}
+  supersedes: schedule.protect_focus
+  evidence {{ source: chat quote: "Draft revision." }}
+}}
+''', file=f"supersede-{status}.mem"))
+        return ws
+
+    attacked = ws_with_superseder("candidate")
+    map_ids = [item["id"]
+               for mod in build_memory_map(attacked)["modules"]
+               for item in mod["items"]]
+    assert "boundary:schedule.protect_focus" in map_ids
+    pack = build_evidence_pack(attacked, "plan my morning focus schedule")
+    assert "boundary:schedule.protect_focus" in [d.id for d in pack.must]
+
+    # Control: an active superseder does suppress its target.
+    legit = ws_with_superseder("active")
+    map_ids = [item["id"]
+               for mod in build_memory_map(legit)["modules"]
+               for item in mod["items"]]
+    assert "boundary:schedule.protect_focus" not in map_ids
+    pack = build_evidence_pack(legit, "plan my morning focus schedule")
+    assert "boundary:schedule.protect_focus" not in [d.id for d in pack.must]
+
+
+def test_candidate_supersedes_candidate_still_suppresses_in_map():
+    # Within the candidate lane an approved revision may replace a draft.
+    ws = Workspace()
+    ws.add_document(parse_text('''
+fact draft.v1 {
+  claim: "First provisional draft."
+  status: candidate
+}
+
+fact draft.v2 {
+  claim: "Second provisional draft."
+  status: candidate
+  supersedes: draft.v1
+}
+''', file="drafts.mem"))
+    map_ids = [item["id"]
+               for mod in build_memory_map(ws)["modules"]
+               for item in mod["items"]]
+    assert "fact:draft.v1" not in map_ids
+    assert "fact:draft.v2" in map_ids

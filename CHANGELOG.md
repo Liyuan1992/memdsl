@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Fixed supersession standing: a non-active declaration's `supersedes`
+  relation can no longer suppress an active target from the memory map,
+  query layers, trusted aliases, or compliance evaluation. Only an active
+  superseder deactivates its target; a candidate superseder now acts within
+  the candidate lane only (an approved revision may still replace a
+  provisional draft). `Workspace.superseded_ids()` accepts an explicit
+  `statuses` filter and defaults to active superseders; the new
+  `Workspace.supersession_suppressor()` returns the standing-aware
+  predicate used by all serving surfaces.
+
 ## 0.6.0 - 2026-07-14
 
 - Kept the dependency-free core on Python 3.9+ while marking the optional

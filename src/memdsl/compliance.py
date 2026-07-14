@@ -179,17 +179,19 @@ def applicable_constraints(
     retrieval.  EvidencePack may fan MUST rules out through a shared subject
     to maximize visibility; an enforcement decision only accepts global
     constraints, an explicit subject/scope match, or direct lexical overlap
-    with the memory itself.  A declaration superseded by another
-    declaration is excluded even when its status field was not updated yet.
+    with the memory itself.  A declaration superseded by an *active*
+    declaration is excluded even when its status field was not updated
+    yet; a candidate or otherwise non-active superseder cannot deactivate
+    an active constraint.
     """
     query = "\n".join(part for part in (task, candidate) if part).strip()
     query_terms = _terms(query)
     selected: Dict[str, Declaration] = {}
-    superseded = ws.superseded_ids()
+    suppressed = ws.supersession_suppressor()
     for decl in ws.active():
         if decl.runtime_role != "constraint" or decl.status != "active":
             continue
-        if decl.id in superseded or decl.name in superseded:
+        if suppressed(decl):
             continue
         if decl.scope == "global":
             selected[decl.id] = decl

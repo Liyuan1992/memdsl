@@ -731,7 +731,13 @@ def test_destructive_revision_always_queues_then_can_be_human_approved(
         str(policy_workspace / "human-reviewed.mem"))
     assert human["status"] == "approved"
     reloaded = Workspace.load([str(policy_workspace)])
-    assert "candidate.one" in reloaded.superseded_ids()
+    # The approved revision is still a candidate: its supersession acts
+    # within the candidate lane only, never on active authority.
+    assert "candidate.one" not in reloaded.superseded_ids()
+    assert "candidate.one" in reloaded.superseded_ids(statuses=("candidate",))
+    suppressed = reloaded.supersession_suppressor()
+    target = reloaded.by_id("candidate.one")
+    assert target is not None and suppressed(target)
 
 
 def test_authoritative_registry_policy_error_happens_before_staging(
