@@ -96,10 +96,16 @@ jobs:
           cache: pip
       - name: Install complete release environment
         run: python -m pip install -U pip && python -m pip install -e ".[dev,mcp]"
+      - name: Validate CFF schema in an isolated environment
+        run: |
+          python -m venv .cff-venv
+          .cff-venv/bin/python -m pip install cffconvert==2.0.0
+          .cff-venv/bin/cffconvert --validate
       - name: Version, compile, and full tests
         run: |
           python scripts/release_checks.py version --expected ${{ env.MEMDSL_RELEASE_VERSION }}
           python scripts/release_checks.py python39-ast
+          python scripts/release_checks.py paper
           python -m compileall -q src tests scripts
           python -m pip check
           git diff --check

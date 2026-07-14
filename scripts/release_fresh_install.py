@@ -13,6 +13,22 @@ from pathlib import Path
 from typing import List, Optional
 
 
+PAPER_FILES = {
+    "CITATION.cff",
+    "LICENSE",
+    "DOCUMENTATION_INDEX.md",
+    "DESIGN_memory_source_compiled_view.md",
+    "PAPER_LICENSE.md",
+    "PAPER_publication_readiness_audit.md",
+    "PAPER_related_work_claim_ledger.md",
+    "PAPER_reproducibility_and_release_metadata.md",
+    "PAPER_review_gated_authority_source_compiled_contract.md",
+    "baselines/PHASE_MINUS_ONE_SCALE_BASELINE.md",
+    "baselines/phase_minus_one_0.6.0.json",
+    "benchmarks/phase_minus_one_baseline.py",
+}
+
+
 STDIO_PROBE = r'''
 import asyncio
 import json
@@ -166,6 +182,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             raise AssertionError(import_payload)
         if not _is_within(import_path, env_dir.resolve()):
             raise AssertionError(f"fresh import escaped venv: {import_path}")
+
+        paper_root = env_dir / "share" / "doc" / "memdsl"
+        missing_paper_files = sorted(
+            relative for relative in PAPER_FILES if not (paper_root / relative).is_file()
+        )
+        if missing_paper_files:
+            raise AssertionError(
+                "fresh wheel is missing paper files: " + ", ".join(missing_paper_files)
+            )
+        print(f"fresh_paper_files={len(PAPER_FILES)}")
 
         _run([str(python), "-m", "pip", "check"], cwd=temp_root)
         _run([str(python), "-m", "memdsl.cli", "--version"], cwd=temp_root)

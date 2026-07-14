@@ -24,3 +24,8 @@ SOFTWARE.
 
 The specification document (docs/SPEC.md) is licensed separately under
 CC-BY-4.0. See docs/SPEC.md for details.
+
+The paper manuscript, its related-work claim ledger, reproducibility metadata,
+publication-readiness audit, and final local integration audit are licensed
+separately under CC BY 4.0. See docs/PAPER_LICENSE.md. The MIT terms above
+continue to apply to the software and do not become the paper license.

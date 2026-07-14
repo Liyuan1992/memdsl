@@ -33,3 +33,20 @@ mcp = ["mcp>=1.2; python_version >= '3.10'"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/memdsl"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"CITATION.cff" = "share/doc/memdsl/CITATION.cff"
+"LICENSE" = "share/doc/memdsl/LICENSE"
+"docs/DOCUMENTATION_INDEX.md" = "share/doc/memdsl/DOCUMENTATION_INDEX.md"
+"docs/DESIGN_memory_source_compiled_view.md" = "share/doc/memdsl/DESIGN_memory_source_compiled_view.md"
+"docs/PAPER_LICENSE.md" = "share/doc/memdsl/PAPER_LICENSE.md"
+"docs/PAPER_publication_readiness_audit.md" = "share/doc/memdsl/PAPER_publication_readiness_audit.md"
+"docs/PAPER_related_work_claim_ledger.md" = "share/doc/memdsl/PAPER_related_work_claim_ledger.md"
+"docs/PAPER_reproducibility_and_release_metadata.md" = "share/doc/memdsl/PAPER_reproducibility_and_release_metadata.md"
+"docs/PAPER_review_gated_authority_source_compiled_contract.md" = "share/doc/memdsl/PAPER_review_gated_authority_source_compiled_contract.md"
+"docs/baselines/PHASE_MINUS_ONE_SCALE_BASELINE.md" = "share/doc/memdsl/baselines/PHASE_MINUS_ONE_SCALE_BASELINE.md"
+"docs/baselines/phase_minus_one_0.6.0.json" = "share/doc/memdsl/baselines/phase_minus_one_0.6.0.json"
+"benchmarks/phase_minus_one_baseline.py" = "share/doc/memdsl/benchmarks/phase_minus_one_baseline.py"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/docs/PAPER_final_integration_audit.md"]

@@ -23,6 +23,12 @@ jobs:
           python -m pip install -U pip
           python -m pip install -e ".[dev,mcp]"
 
+      - name: Validate CFF schema in an isolated environment
+        run: |
+          python -m venv .cff-venv
+          .cff-venv/bin/python -m pip install cffconvert==2.0.0
+          .cff-venv/bin/cffconvert --validate
+
       - name: Verify tag and runtime versions agree
         run: |
           TAG="${GITHUB_REF_NAME#v}"
@@ -32,6 +38,7 @@ jobs:
         run: |
           python -m compileall -q src tests scripts
           python scripts/release_checks.py python39-ast
+          python scripts/release_checks.py paper
           python -m pip check
           git diff --check
           python -m pytest -q

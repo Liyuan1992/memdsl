@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: >-
+  Cite the top-level record for the shipped memdsl software. Cite the
+  preferred-citation record for the unpublished review-gated-authority paper.
+type: software
+title: memdsl
+authors:
+  - family-names: liyuan
+version: "0.6.0"
+date-released: 2026-07-14
+commit: 72274d9d4f065b76bceaf30f529dcbd47b3f3e18
+repository-code: https://github.com/Liyuan1992/memdsl
+url: https://github.com/Liyuan1992/memdsl
+license: MIT
+keywords:
+  - agent memory
+  - declarative memory
+  - review governance
+  - domain-specific language
+preferred-citation:
+  type: generic
+  title: >-
+    Review-Gated Authority for Persistent Agent Memory: A Ratification-Rooted
+    Contract Against Semantic Authority Laundering
+  authors:
+    - family-names: liyuan
+      affiliation: Independent Researcher
+  year: 2026
+  version: "0.6"
+  repository-code: https://github.com/Liyuan1992/memdsl
+  license: CC-BY-4.0

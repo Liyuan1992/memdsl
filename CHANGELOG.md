@@ -43,6 +43,11 @@
 - Hardened tag publishing to install the MCP extra, run full tests and
   compile/AST gates, inspect and privacy-scan wheel/sdist members, and perform
   an outside-repository fresh-wheel CLI plus real MCP stdio smoke before upload.
+- Integrated the separately verified focused paper v0.6 artifact alongside the
+  practical 0.8.0 specification without treating the paper authority runtime
+  as implemented. Added an explicit documentation index, software/paper
+  citation and license split, P5 publication-readiness record, and required
+  paper/reproducibility members in both wheel and sdist release checks.
 
 ## 0.6.0 - 2026-07-14
 

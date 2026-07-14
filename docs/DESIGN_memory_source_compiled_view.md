@@ -3,6 +3,8 @@
 - 状态：Phase -1、0A、0B、1、2、3、4、5 已整合为本地 0.8.0 release candidate；Phase 6/7 Entry-Gate 已审计并延期
 - 发布整合起点：audit commit `ff9ff8a7dfe983a9db3caaf221d7315cfda8eba6`，其 parent / Phase 5 commit 为 `8e7c84815897ad13f89522e9e3b1edd0fcdb37b0`；包版本元数据已统一为 0.8.0
 - 目标版本：Phase -1 至 Phase 5 发布候选冻结为 0.8.0；Phase 6/7 不进入该 release；默认停止在本地 clean commit 与 release evidence
+- 配套论文：聚焦立场论文 [Review-Gated Authority for Persistent Agent Memory](PAPER_review_gated_authority_source_compiled_contract.md) 与本文并列保存；论文 v0.6 的 authority ledger、digest-bound grants、proof objects、live reduction closure 和 `Verify` sinks 仍是未实现研究合同
+- 文档入口：[DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) 统一列出实践规范、论文、claim ledger、复现记录、就绪审计、引用和许可边界
 - 读者：memdsl 维护者、宿主集成者、MCP 客户端作者、领域 schema 作者
 - 文档语言：中文；公共协议冻结后应同步更新英文 SPEC、PUBLIC_API 和 README
 
@@ -12,6 +14,11 @@
 characterization；各阶段“实际完成结果”和第 24 节以当前 0.8.0 候选源码与本地证据
 为准。凡尚未实现而标为 MUST/SHOULD/MAY 的内容仍是拟议合同，只有在对应阶段实现、
 测试、文档和发布门全部完成后，才能成为公开承诺。
+
+配套论文提出的是更窄但更强的 persistent declaration authority 合同。本文的
+practical Phase 6/7 与论文的 authority runtime 不是同一条实施编号；本次整合不会
+借“论文 Phase”或“P6 integration”重新开启一等 Edge、cold history、增量编译，
+也不会把现有 lifecycle/review 状态重新命名为论文中的 `Grant` authority。
 
 文档中的 MUST、MUST NOT、SHOULD、SHOULD NOT、MAY 按规范性要求理解。
 

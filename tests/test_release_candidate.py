@@ -33,6 +33,8 @@ def test_ci_covers_core_mcp_security_and_artifact_release_gates() -> None:
     assert "test_phase_three_indexed_query_trace.py" in workflow
     assert "test_phase_four_use_dialect.py" in workflow
     assert "test_phase_five_quarantine_enforcement.py" in workflow
+    assert "release_checks.py paper" in workflow
+    assert "cffconvert --validate" in workflow
     assert "release_checks.py artifacts" in workflow
     assert "release_fresh_install.py" in workflow
 
@@ -45,6 +47,8 @@ def test_publish_workflow_runs_complete_gates_before_upload() -> None:
     required = [
         '.[dev,mcp]',
         "release_checks.py version",
+        "release_checks.py paper",
+        "cffconvert --validate",
         "python -m compileall",
         "python -m pytest -q",
         "python -m twine check",
@@ -67,6 +71,12 @@ def test_artifact_member_privacy_rules_reject_runtime_and_private_inputs() -> No
     assert module._check_member_name(
         "memdsl-0.8.0/tests/fixtures/phase_minus_one/baseline.mem"
     ) == []
+    synthetic_entries = [
+        (f"memdsl-0.8.0/{suffix}", b"")
+        for suffix in module.REQUIRED_PAPER_MEMBER_SUFFIXES
+    ]
+    assert module._missing_paper_members(synthetic_entries) == []
+    assert module._missing_paper_members(synthetic_entries[:-1])
     for forbidden in (
         "memdsl-0.8.0/approved.mem",
         "memdsl-0.8.0/private/workspace.mem",
@@ -77,3 +87,12 @@ def test_artifact_member_privacy_rules_reject_runtime_and_private_inputs() -> No
         "memdsl-0.8.0/id_ed25519",
     ):
         assert module._check_member_name(forbidden), forbidden
+
+
+def test_paper_metadata_and_frozen_evidence_contract() -> None:
+    script = ROOT / "scripts" / "release_checks.py"
+    spec = importlib.util.spec_from_file_location("release_checks_paper", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.check_paper(ROOT)
