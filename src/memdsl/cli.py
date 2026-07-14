@@ -3,6 +3,7 @@
     memdsl lint PATH...              lint memory source files
     memdsl map PATH...               compact per-module index of a workspace
     memdsl catalog PATH...           bounded module navigation pages
+    memdsl trace PATH... ID          bounded relation graph traversal
     memdsl query PATH... -q TEXT     build an evidence pack for a query
     memdsl check PATH...             preflight a draft against MUST rules
     memdsl explain PATH... ID        show one declaration with relations
@@ -27,6 +28,16 @@ from memdsl.benchmark import (
 )
 from memdsl.compliance import check_compliance
 from memdsl.compiler import compile_workspace
+from memdsl.graph import (
+    TRACE_DEFAULT_MAX_BYTES,
+    TRACE_DEFAULT_MAX_DEPTH,
+    TRACE_DEFAULT_MAX_EDGES,
+    TRACE_DEFAULT_MAX_NODES,
+    TraceAnchorError,
+    TraceCursorError,
+    render_trace_text,
+    trace_memory,
+)
 from memdsl.linter import has_errors, lint
 from memdsl.model import Workspace
 from memdsl.navigation import (
@@ -144,6 +155,40 @@ def main(argv: List[str] = None) -> int:
     p_query.add_argument("--subject", help="restrict to a subject symbol")
     p_query.add_argument("--limit", type=int, default=8)
     p_query.add_argument("--json", action="store_true", help="JSON output")
+
+    p_trace = sub.add_parser(
+        "trace", help="bounded deterministic relation graph traversal")
+    p_trace.add_argument("paths", nargs="+", help=".mem files or directories")
+    p_trace.add_argument("id", help="anchor declaration id (type:name or name)")
+    p_trace.add_argument(
+        "--anchor", action="append", default=[],
+        help="additional anchor declaration id (repeatable)")
+    direction = p_trace.add_mutually_exclusive_group()
+    direction.add_argument(
+        "--outgoing", action="store_const", const="outgoing", dest="direction")
+    direction.add_argument(
+        "--incoming", action="store_const", const="incoming", dest="direction")
+    direction.add_argument(
+        "--both", action="store_const", const="both", dest="direction")
+    p_trace.set_defaults(direction="outgoing")
+    p_trace.add_argument(
+        "--relation", action="append", dest="relations",
+        help="restrict to a relation name (repeatable)")
+    p_trace.add_argument(
+        "--depth", type=int, default=TRACE_DEFAULT_MAX_DEPTH,
+        help="maximum BFS depth")
+    p_trace.add_argument(
+        "--max-nodes", type=int, default=TRACE_DEFAULT_MAX_NODES)
+    p_trace.add_argument(
+        "--max-edges", type=int, default=TRACE_DEFAULT_MAX_EDGES)
+    p_trace.add_argument(
+        "--max-bytes", type=int, default=TRACE_DEFAULT_MAX_BYTES,
+        help="canonical compact UTF-8 JSON byte budget")
+    p_trace.add_argument("--cursor", help="opaque cursor from a prior page")
+    p_trace.add_argument(
+        "--include-provisional", action="store_true",
+        help="include candidate/provisional nodes without granting authority")
+    p_trace.add_argument("--json", action="store_true", help="JSON envelope output")
 
     p_explain = sub.add_parser("explain", help="show one declaration")
     p_explain.add_argument("paths", nargs="+", help=".mem files or directories")
@@ -325,6 +370,61 @@ def main(argv: List[str] = None) -> int:
         pack = build_evidence_pack(ws, args.query, kinds=args.kinds,
                                    subject=args.subject, limit=args.limit)
         print(pack.render_json() if args.json else pack.render_text())
+        return 0
+
+    if args.command == "trace":
+        ws = _load(args.paths)
+        compiled = compile_workspace(ws, paths=args.paths)
+        try:
+            payload = trace_memory(
+                compiled,
+                [args.id] + list(args.anchor or []),
+                direction=args.direction,
+                relations=args.relations,
+                max_depth=args.depth,
+                max_nodes=args.max_nodes,
+                max_edges=args.max_edges,
+                max_bytes=args.max_bytes,
+                cursor=args.cursor,
+                include_provisional=args.include_provisional,
+            )
+        except TraceCursorError as exc:
+            error = {
+                "schema_version": "memdsl.trace.v1",
+                "status": exc.code,
+                "error": exc.code,
+                "details": [str(exc)],
+            }
+            if args.json:
+                print(json.dumps(error, indent=2, ensure_ascii=False))
+            else:
+                print(str(exc), file=sys.stderr)
+            return 1
+        except TraceAnchorError as exc:
+            error = {
+                "schema_version": "memdsl.trace.v1",
+                "status": exc.code,
+                "error": exc.code,
+                "details": [str(exc)],
+            }
+            if args.json:
+                print(json.dumps(error, indent=2, ensure_ascii=False))
+            else:
+                print(str(exc), file=sys.stderr)
+            return 1
+        except ValueError as exc:
+            if args.json:
+                print(json.dumps({
+                    "schema_version": "memdsl.trace.v1",
+                    "status": "invalid",
+                    "error": "invalid_trace_request",
+                    "details": [str(exc)],
+                }, indent=2, ensure_ascii=False))
+            else:
+                print(f"invalid trace request: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(payload, indent=2, ensure_ascii=False)
+              if args.json else render_trace_text(payload))
         return 0
 
     if args.command == "explain":

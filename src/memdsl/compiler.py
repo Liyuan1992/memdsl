@@ -1,4 +1,4 @@
-"""Internal deterministic workspace compilation for Phase 1.
+"""Internal deterministic workspace compilation through Phase 3.
 
 This module is deliberately not re-exported from :mod:`memdsl`.  It provides
 the indexed, rebuildable representation used by the existing v0.6 read
@@ -16,10 +16,11 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple, Union
 
+from memdsl.lexical import query_terms
 from memdsl.model import Declaration, EXCLUDED_STATUSES, RELATION_FIELDS, Workspace
 
 
-COMPILER_CONTRACT_VERSION = "memdsl.compiler.phase1.v1"
+COMPILER_CONTRACT_VERSION = "memdsl.compiler.phase3.v1"
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,8 @@ class CompiledWorkspace:
     by_subject: DeclarationIndex
     by_scope: DeclarationIndex
     aliases: DeclarationIndex
+    searchable_declarations: Tuple[Declaration, ...]
+    lexical_terms: DeclarationIndex
     outgoing: EdgeIndex
     incoming: EdgeIndex
     diagnostics: Tuple[CompilationDiagnostic, ...]
@@ -217,6 +220,8 @@ def compile_workspace(
     by_subject: Dict[str, list] = {}
     by_scope: Dict[str, list] = {}
     aliases: Dict[str, list] = {}
+    lexical_terms: Dict[str, list] = {}
+    searchable_declarations = []
     first_by_id: Dict[str, Declaration] = {}
     first_by_name: Dict[str, Declaration] = {}
 
@@ -238,6 +243,10 @@ def compile_workspace(
             if isinstance(raw_aliases, list):
                 for alias in raw_aliases:
                     _append(aliases, str(alias).lower(), declaration)
+        elif declaration.has_capability("searchable"):
+            searchable_declarations.append(declaration)
+            for term in dict.fromkeys(query_terms(declaration.searchable_text())):
+                _append(lexical_terms, term, declaration)
 
     frozen_occurrences = _freeze_declaration_index(occurrences_by_id)
     frozen_names = _freeze_declaration_index(by_name)
@@ -390,6 +399,9 @@ def compile_workspace(
         by_subject=_freeze_declaration_index(by_subject),
         by_scope=_freeze_declaration_index(by_scope),
         aliases=_freeze_declaration_index(aliases),
+        searchable_declarations=tuple(sorted(
+            searchable_declarations, key=_declaration_sort_key)),
+        lexical_terms=_freeze_declaration_index(lexical_terms),
         outgoing=frozen_outgoing,
         incoming=frozen_incoming,
         diagnostics=diagnostics,

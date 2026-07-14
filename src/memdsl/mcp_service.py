@@ -34,6 +34,15 @@ from memdsl.compiler import (
     source_state_signature,
 )
 from memdsl.compliance import check_compliance
+from memdsl.graph import (
+    TRACE_DEFAULT_MAX_BYTES,
+    TRACE_DEFAULT_MAX_DEPTH,
+    TRACE_DEFAULT_MAX_EDGES,
+    TRACE_DEFAULT_MAX_NODES,
+    TraceAnchorError,
+    TraceCursorError,
+    _build_mcp_memory_trace,
+)
 from memdsl.linter import lint
 from memdsl.model import Workspace, Declaration
 from memdsl.navigation import (
@@ -89,6 +98,7 @@ TOOL_NAMES = (
     "memory_catalog",
     "memory_map",
     "memory_query",
+    "memory_trace",
     "memory_check",
     "memory_types",
     "memory_explain",
@@ -573,6 +583,12 @@ class MemdslMCPService:
             next_actions.append(
                 "MISSING lists known gaps and open issues; treat them as unknowns, not as absence of rules."
             )
+        retry_queries = pack.trace.get("retry_queries", [])
+        if retry_queries:
+            next_actions.append(
+                "Retry with suggested workspace vocabulary: "
+                + "; ".join(str(item) for item in retry_queries)
+            )
         payload = {
             "ok": True,
             "schema_version": schema,
@@ -600,6 +616,73 @@ class MemdslMCPService:
             )
             payload["vocabulary"] = workspace_vocabulary(compiled)
         return payload
+
+    def trace(
+        self,
+        anchors: Sequence[str],
+        *,
+        direction: str = "outgoing",
+        relations: Optional[Sequence[str]] = None,
+        max_depth: int = TRACE_DEFAULT_MAX_DEPTH,
+        max_nodes: int = TRACE_DEFAULT_MAX_NODES,
+        max_edges: int = TRACE_DEFAULT_MAX_EDGES,
+        max_bytes: int = TRACE_DEFAULT_MAX_BYTES,
+        cursor: Optional[str] = None,
+        include_provisional: bool = False,
+    ) -> dict:
+        """Return one bounded deterministic BFS Trace page."""
+        self.require_scope(SEARCH_SCOPE)
+        schema = "memdsl.mcp.trace.v1"
+        try:
+            compiled = self.compiled_workspace()
+            return _build_mcp_memory_trace(
+                compiled,
+                anchors,
+                direction=direction,
+                relations=relations,
+                max_depth=max_depth,
+                max_nodes=max_nodes,
+                max_edges=max_edges,
+                max_bytes=max_bytes,
+                cursor=cursor,
+                include_provisional=include_provisional,
+            )
+        except (ParseError, SchemaError) as exc:
+            return self._workspace_error(schema, exc)
+        except TraceCursorError as exc:
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": exc.code,
+                "error": exc.code,
+                "details": [str(exc)],
+                "next_actions": [
+                    "Restart Trace pagination from the first page."
+                    if exc.code == "cursor_stale" else
+                    "Reuse the cursor only with the original Trace request."
+                ],
+            }
+        except TraceAnchorError as exc:
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": exc.code,
+                "error": exc.code,
+                "details": [str(exc)],
+                "next_actions": [
+                    "Use memory_list or memory_query to choose a readable, "
+                    "serviceable full declaration id."
+                ],
+            }
+        except ValueError as exc:
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": "invalid",
+                "error": "invalid_trace_request",
+                "details": [str(exc)],
+                "next_actions": ["Correct the Trace request and retry."],
+            }
 
     def explain(self, decl_id: str) -> dict:
         self.require_scope(SEARCH_SCOPE)

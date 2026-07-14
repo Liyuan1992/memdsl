@@ -1,6 +1,6 @@
 """Query executor: retrieve declarations and render a layered EvidencePack.
 
-The reference executor is deliberately simple: lowercase term overlap
+The reference executor uses a deterministic lexical inverted candidate index
 plus alias resolution, with typed layering on top. It demonstrates the
 *contract* (query in, MUST/SHOULD/CONTEXT/PROVISIONAL/CONFLICT/MISSING out) --
 production systems should plug in a real retrieval backend (BM25,
@@ -10,31 +10,20 @@ embeddings, or both) behind the same contract.
 from __future__ import annotations
 
 import json
-import re
+from difflib import SequenceMatcher
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from memdsl.authority import current_declarations
 from memdsl.compiler import WorkspaceInput, ensure_compiled
+from memdsl.lexical import query_terms
 from memdsl.model import Declaration
+from memdsl.view import resolve_view
 
 EVIDENCE_PACK_SCHEMA = "memdsl.evidence_pack.v1"
 
-_WORD_RE = re.compile(r"[a-z0-9_]+")
-
-_STOPWORDS = {
-    "the", "a", "an", "is", "are", "was", "were", "be", "been", "of", "to",
-    "in", "on", "at", "for", "and", "or", "not", "no", "my", "me", "i",
-    "it", "its", "this", "that", "these", "those", "do", "does", "did",
-    "how", "what", "when", "where", "which", "who", "why", "should",
-    "would", "could", "can", "will", "with", "about", "into", "over",
-    "please", "help", "going", "keep", "get", "make", "your", "you", "we",
-    "our", "us", "if", "so", "as", "by", "from", "up", "out", "any",
-}
-
-
 def _terms(text: str) -> List[str]:
-    return [t for t in _WORD_RE.findall(text.lower()) if t not in _STOPWORDS]
+    return query_terms(text)
 
 
 @dataclass
@@ -233,9 +222,53 @@ def build_evidence_pack(
     limit: int = 8,
     types: Optional[List[str]] = None,
 ) -> EvidencePack:
-    """Run a query against the workspace and build a layered EvidencePack."""
+    """Run an indexed query and build a v0.6-compatible EvidencePack."""
+    return _build_evidence_pack(
+        ws,
+        query,
+        kinds=kinds,
+        subject=subject,
+        limit=limit,
+        types=types,
+        candidate_mode="indexed",
+    )
+
+
+def _build_evidence_pack_legacy(
+    ws: WorkspaceInput,
+    query: str,
+    kinds: Optional[List[str]] = None,
+    subject: Optional[str] = None,
+    limit: int = 8,
+    types: Optional[List[str]] = None,
+) -> EvidencePack:
+    """Phase 3 differential oracle using the pre-index full scoring scan."""
+    return _build_evidence_pack(
+        ws,
+        query,
+        kinds=kinds,
+        subject=subject,
+        limit=limit,
+        types=types,
+        candidate_mode="legacy",
+    )
+
+
+def _build_evidence_pack(
+    ws: WorkspaceInput,
+    query: str,
+    *,
+    kinds: Optional[List[str]],
+    subject: Optional[str],
+    limit: int,
+    types: Optional[List[str]],
+    candidate_mode: str,
+) -> EvidencePack:
+    """Shared EvidencePack semantics over indexed or legacy candidates."""
     compiled = ensure_compiled(ws)
     current = current_declarations(compiled)
+    current_objects = {id(item) for item in current}
+    view = resolve_view(compiled)
     pack = EvidencePack(query=query)
     query_terms = _terms(query)
 
@@ -252,9 +285,8 @@ def build_evidence_pack(
 
     type_filter = types if types is not None else kinds
     pool = [
-        d for d in current
-        if d.runtime_role != "symbol"
-        and d.has_capability("searchable")
+        declaration for declaration in compiled.searchable_declarations
+        if id(declaration) in current_objects
     ]
     candidates = [
         d for d in pool
@@ -262,7 +294,16 @@ def build_evidence_pack(
         and (subject is None or d.subject == subject)
     ]
 
-    scored = [_score(d, query_terms, subject_hits) for d in candidates]
+    indexed_pool = _indexed_candidate_pool(
+        compiled, current_objects, query_terms, subject_hits)
+    score_pool = pool if candidate_mode == "legacy" else indexed_pool
+    all_scored = [_score(d, query_terms, subject_hits) for d in score_pool]
+    all_positive = [item for item in all_scored if item.score > 0]
+    candidate_objects = {id(item) for item in candidates}
+    scored = [
+        item for item in all_scored
+        if id(item.declaration) in candidate_objects
+    ]
     matched = [s for s in scored if s.score > 0]
 
     # Authority lanes must be ranked and limited independently.  Otherwise a
@@ -271,14 +312,16 @@ def build_evidence_pack(
     # Provisional memory remains bounded, but never competes with active
     # authority for its result slots.
     result_limit = max(0, limit)
-    active_hits = sorted(
+    active_matches = sorted(
         (s for s in matched if s.declaration.status == "active"),
         key=_scored_sort_key,
-    )[:result_limit]
-    provisional_hits = sorted(
+    )
+    provisional_matches = sorted(
         (s for s in matched if s.declaration.status != "active"),
         key=_scored_sort_key,
-    )[:result_limit]
+    )
+    active_hits = active_matches[:result_limit]
+    provisional_hits = provisional_matches[:result_limit]
     pack.provisional.extend(provisional_hits)
     # MISSING is an authoritative lane too.  Provisional matches may be shown
     # as leads, but they cannot suppress an active-memory gap.
@@ -288,11 +331,9 @@ def build_evidence_pack(
     # "the memory exists, your filter hid it" instead of a silent no-match.
     excluded_matches: List[ScoredDeclaration] = []
     if len(candidates) != len(pool):
-        candidate_ids = {d.id for d in candidates}
         excluded_matches = sorted(
-            [s for s in (_score(d, query_terms, subject_hits)
-                         for d in pool if d.id not in candidate_ids)
-             if s.score > 0],
+            [item for item in all_positive
+             if id(item.declaration) not in candidate_objects],
             key=_scored_sort_key)
     # Provisional matches are informative only: they must not fan out through
     # a shared subject or scope and thereby activate an authoritative MUST.
@@ -370,7 +411,33 @@ def build_evidence_pack(
             pack.missing.append(
                 f"question [{d.id}]: {d.claim_text}{_render_lifecycle(d)}")
 
+    if has_active_hits:
+        vocabulary_suggestions = []
+        retry_queries = []
+        suggestions_truncated = False
+    else:
+        vocabulary_suggestions, retry_queries, suggestions_truncated = (
+            _vocabulary_suggestions(
+                compiled,
+                view.authoritative,
+                query_terms,
+                query,
+            )
+        )
+    indexes_used = [
+        "legacy_scan" if candidate_mode == "legacy" else "lexical_terms",
+        "active_aliases",
+    ]
+    if subject_hits:
+        indexes_used.append("subject")
+    if type_filter is not None:
+        indexes_used.append("type_filter")
+    if subject is not None:
+        indexes_used.append("subject_filter")
     pack.trace = {
+        "view_id": view.view_id,
+        "source_fingerprint": compiled.source_fingerprint,
+        "indexes_used": indexes_used,
         "query_terms": query_terms,
         "matched_aliases": {alias: sorted(set(symbols))
                             for alias, symbols in amap.items()
@@ -379,6 +446,8 @@ def build_evidence_pack(
             "types": list(type_filter) if type_filter is not None else None,
             "subject": subject,
         },
+        "candidate_pool_total": len(all_positive),
+        "candidate_pool_after_filters": len(matched),
         "candidates_considered": len(candidates),
         "hits": len(active_hits) + len(provisional_hits),
         "excluded_by_filters_total": len(excluded_matches),
@@ -389,9 +458,160 @@ def build_evidence_pack(
              "matched_terms": sorted(s.matched_terms)}
             for s in excluded_matches[:5]
         ],
+        "quarantined_matches": [],
+        "vocabulary_suggestions": vocabulary_suggestions,
+        "retry_queries": retry_queries,
+        "truncated": bool(
+            len(active_matches) > result_limit
+            or len(provisional_matches) > result_limit
+            or len(excluded_matches) > 5
+            or suggestions_truncated
+        ),
     }
 
     return pack
+
+
+def _indexed_candidate_pool(
+    compiled,
+    current_objects: set,
+    terms: Sequence[str],
+    subject_hits: Sequence[str],
+) -> List[Declaration]:
+    selected: Dict[int, Declaration] = {}
+    for term in dict.fromkeys(terms):
+        for declaration in compiled.lexical_terms.get(term, ()):
+            if id(declaration) in current_objects:
+                selected[id(declaration)] = declaration
+    for subject in dict.fromkeys(subject_hits):
+        for declaration in compiled.by_subject.get(subject, ()):
+            if (id(declaration) in current_objects
+                    and declaration.runtime_role != "symbol"
+                    and declaration.has_capability("searchable")):
+                selected[id(declaration)] = declaration
+    return [
+        declaration for declaration in compiled.searchable_declarations
+        if id(declaration) in selected
+    ]
+
+
+def _vocabulary_suggestions(
+    compiled,
+    authoritative: Sequence[Declaration],
+    terms: Sequence[str],
+    query: str,
+    *,
+    limit: int = 5,
+) -> Tuple[List[dict], List[str], bool]:
+    """Suggest active public workspace vocabulary without changing routing."""
+    vocabulary: Dict[Tuple[str, str], set] = {}
+    authoritative_objects = {id(item) for item in authoritative}
+    public = [
+        declaration for declaration in authoritative
+        if not declaration.access_policy
+    ]
+    for declaration in public:
+        if declaration.runtime_role == "symbol":
+            symbol = declaration.name
+            phrases = [(symbol.rsplit(".", 1)[-1].lower(), "symbol")]
+            canonical = declaration.fields.get("canonical_name")
+            if isinstance(canonical, str) and canonical.strip():
+                phrases.append((canonical.strip().lower(), "canonical_name"))
+            aliases = declaration.fields.get("aliases")
+            if isinstance(aliases, list):
+                phrases.extend(
+                    (str(alias).strip().lower(), "alias")
+                    for alias in aliases if str(alias).strip()
+                )
+            for phrase, category in phrases:
+                vocabulary.setdefault((phrase, category), set()).add(symbol)
+        if declaration.module:
+            vocabulary.setdefault(
+                (str(declaration.module).lower(), "module"), set())
+        vocabulary.setdefault((declaration.kind.lower(), "type"), set())
+
+    # Candidate or excluded symbols cannot enter an authoritative suggestion
+    # merely because their term appears in a compiler index.
+    active_symbols = {
+        declaration.name
+        for declaration in compiled.declarations
+        if id(declaration) in authoritative_objects
+        if declaration.runtime_role == "symbol"
+        if not declaration.access_policy
+    }
+    ranked = []
+    category_priority = {
+        "symbol": 0,
+        "alias": 1,
+        "canonical_name": 2,
+        "module": 3,
+        "type": 4,
+    }
+    for query_term in dict.fromkeys(terms):
+        for (phrase, category), raw_symbols in vocabulary.items():
+            if query_term == phrase or not phrase:
+                continue
+            score, reason = _suggestion_score(query_term, phrase)
+            if score < 0.72:
+                continue
+            symbols = tuple(sorted(set(raw_symbols) & active_symbols))
+            ranked.append((
+                -score,
+                query_term,
+                phrase,
+                category_priority.get(category, 99),
+                category,
+                symbols,
+                reason,
+            ))
+    ranked.sort()
+
+    suggestions = []
+    seen_terms = set()
+    for (
+        _negative_score,
+        query_term,
+        phrase,
+        _category_priority,
+        category,
+        symbols,
+        reason,
+    ) in ranked:
+        if query_term in seen_terms:
+            continue
+        seen_terms.add(query_term)
+        suggestions.append({
+            "query_term": query_term,
+            "suggestion": phrase,
+            "category": category,
+            "reason": reason,
+            "authoritative": True,
+            "ambiguous": len(symbols) > 1,
+            "symbols": list(symbols),
+        })
+        if len(suggestions) >= limit:
+            break
+
+    retry_queries = []
+    replacements = {
+        item["query_term"]: item["suggestion"]
+        for item in suggestions
+        if not item["ambiguous"]
+    }
+    for term, replacement in replacements.items():
+        retry = " ".join(
+            replacement if item == term else item for item in terms)
+        if retry and retry.lower() != str(query or "").strip().lower():
+            retry_queries.append(retry)
+    retry_queries = list(dict.fromkeys(retry_queries))[:limit]
+    return suggestions, retry_queries, len(ranked) > len(suggestions)
+
+
+def _suggestion_score(query_term: str, phrase: str) -> Tuple[float, str]:
+    if (len(query_term) >= 3 and len(phrase) >= 3
+            and (query_term.startswith(phrase) or phrase.startswith(query_term))):
+        return 0.95, "prefix"
+    return SequenceMatcher(None, query_term, phrase).ratio(), "edit_distance"
 
 
 def workspace_vocabulary(ws: WorkspaceInput, limit: int = 50) -> dict:

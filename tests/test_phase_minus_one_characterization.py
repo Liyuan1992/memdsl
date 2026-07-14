@@ -70,7 +70,32 @@ def test_map_query_and_explain_payload_snapshots() -> None:
     service = service_for_workspace(ws)
 
     assert service.memory_map() == snapshot("memory_map.json")
-    assert service.query("lantern release", limit=3) == snapshot("query.json")
+    query = service.query("lantern release", limit=3)
+    trace = query["evidence_pack"]["search_trace"]
+    additive_phase_three = {
+        key: trace.pop(key)
+        for key in (
+            "view_id",
+            "source_fingerprint",
+            "indexes_used",
+            "candidate_pool_total",
+            "candidate_pool_after_filters",
+            "quarantined_matches",
+            "vocabulary_suggestions",
+            "retry_queries",
+            "truncated",
+        )
+    }
+    assert query == snapshot("query.json")
+    assert additive_phase_three["view_id"]
+    assert additive_phase_three["source_fingerprint"]
+    assert additive_phase_three["indexes_used"][0] == "lexical_terms"
+    assert additive_phase_three["candidate_pool_total"] == 3
+    assert additive_phase_three["candidate_pool_after_filters"] == 3
+    assert additive_phase_three["quarantined_matches"] == []
+    assert additive_phase_three["vocabulary_suggestions"] == []
+    assert additive_phase_three["retry_queries"] == []
+    assert additive_phase_three["truncated"] is False
     assert service.explain("boundary:safety.no_ember") == snapshot("explain.json")
 
 

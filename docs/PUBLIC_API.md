@@ -33,6 +33,9 @@ from memdsl import (
     SchemaError,
     TypeDescriptor,
     TypeRegistry,
+    TRACE_SCHEMA,
+    TraceAnchorError,
+    TraceCursorError,
     ValidationResult,
     Workspace,
     build_evidence_pack,
@@ -50,6 +53,7 @@ from memdsl import (
     review_digest,
     review_stats,
     staging_dir_for,
+    trace_memory,
     verify_workspace_file_quote,
     workspace_fingerprint,
     workspace_vocabulary,
@@ -85,7 +89,15 @@ not apply exclusion authority; cycle participants remain visible and lint
 reports `revision_cycle`. A report-mode fork never selects one successor.
 
 Serialized packs also expose `search_trace` so a miss carries enough
-information to retry instead of looking like absence.
+information to retry instead of looking like absence. Phase 3 additively adds
+the report-only `view_id`/`source_fingerprint`, `indexes_used`, exact lexical
+candidate-pool counts, permission-safe `quarantined_matches`, bounded
+`vocabulary_suggestions`, deterministic `retry_queries`, and `truncated`.
+The legacy trace fields and EvidencePack authority layers are unchanged.
+
+Vocabulary suggestions are lexical hints only. They use active symbols and
+unrestricted vocabulary, never write aliases, never route through candidate
+symbols, and do not auto-retry an ambiguous phrase.
 
 `lint(workspace)` also reports deterministic compiler/link codes:
 `ambiguous_relation_target`, `relation_target_kind_mismatch`,
@@ -127,6 +139,18 @@ while catalog["next_cursor"]:
 map_data = build_memory_map(workspace)
 text = render_memory_map_text(map_data)
 vocab = workspace_vocabulary(workspace)
+
+trace = trace_memory(
+    workspace,
+    ["decision:aurora.pricing_free_tier"],
+    direction="both",
+    relations=["supports", "revision_of"],
+    max_depth=2,
+    max_nodes=20,
+    max_edges=40,
+    max_bytes=8192,
+)
+assert trace["schema_version"] == TRACE_SCHEMA
 ```
 
 `build_memory_catalog()` is the Phase 2 bounded navigation API. It returns
@@ -150,6 +174,18 @@ uses the same set and now exposes total/truncated metadata when its compatibilit
 slice is actually incomplete. Items carry no evidence and claims are truncated,
 so neither Map nor Catalog is a citation source. Map v1 remains available for
 existing clients and is not changed into Catalog.
+
+`trace_memory()` is the Phase 3 bounded graph-navigation API. It emits a
+deterministic BFS tree plus explicit back/cycle/cross edges and supports
+incoming, outgoing, or bidirectional traversal, exact relation filters,
+depth/node/edge/byte budgets, stateless pagination, and opt-in provisional
+visibility. Defaults are depth 3, 20 nodes, 40 edges, and 8192 canonical compact
+UTF-8 JSON bytes. `TraceCursorError.code` is `invalid_cursor`,
+`cursor_mismatch`, or `cursor_stale`; `TraceAnchorError.code` distinguishes
+missing, ambiguous, unauthorized, and non-serviceable anchors. Trace omits
+declarations with non-empty access policy in Phase 3 and never represents graph
+connectivity as proof. `CompiledWorkspace`, `ViewContext`, and `ResolvedView`
+remain internal rather than new package-root types.
 
 ## Governed write path
 
@@ -382,9 +418,12 @@ approval, audit replay, and correction semantics do not depend on it.
 ## Compatibility promise
 
 Patch releases in the 0.6 line will not remove these root exports or change
-the authority meaning of EvidencePack layers. `provisional` is additive to
+the authority meaning of EvidencePack layers. `provisional` and the Phase 3
+search-trace metadata are additive to
 `memdsl.evidence_pack.v1`; breaking serialized schema changes require a new
-schema id. The lifecycle-safe supersede resolver is a correctness/security fix
+schema id. Trace uses separate `memdsl.trace.v1` / `memdsl.mcp.trace.v1`
+schemas rather than changing Map/query/explain authority. The lifecycle-safe
+supersede resolver is a correctness/security fix
 to that existing authority promise: code that relied on candidate, retracted,
 archived, ambiguous, duplicate, or wrongly prefixed supersedes hiding a target
 was relying on unintended behavior.

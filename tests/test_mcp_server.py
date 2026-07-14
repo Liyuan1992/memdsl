@@ -60,7 +60,8 @@ def server(workspace_dir):
 def test_tools_registered(server):
     tools = asyncio.run(server.list_tools())
     names = {t.name for t in tools}
-    assert set(TOOL_NAMES) <= names
+    assert len(TOOL_NAMES) == 11
+    assert names == set(TOOL_NAMES)
 
 
 def test_memory_propose_tool_does_not_accept_attestation_fields(server):
@@ -92,6 +93,23 @@ def test_catalog_tool_schema_and_prompt_recommend_bounded_navigation(server):
     } <= set(properties)
     assert "memory_catalog" in SERVER_INSTRUCTIONS
     assert "memory_map once at session start" not in SERVER_INSTRUCTIONS
+
+
+def test_trace_tool_schema_and_call_are_bounded_and_explicit(server):
+    tools = asyncio.run(server.list_tools())
+    trace = next(item for item in tools if item.name == "memory_trace")
+    properties = trace.inputSchema.get("properties", {})
+    assert {
+        "anchors", "direction", "relations", "max_depth", "max_nodes",
+        "max_edges", "max_bytes", "cursor", "include_provisional",
+    } <= set(properties)
+    assert "connectivity is not proof" in trace.description
+    result = asyncio.run(server.call_tool(
+        "memory_trace",
+        {"anchors": ["boundary:schedule.no_meetings_before_10"]},
+    ))
+    text = json.dumps(_as_jsonable(result), ensure_ascii=False, default=str)
+    assert "memdsl.mcp.trace.v1" in text
 
 
 def test_call_memory_catalog_and_read_catalog_resource(server):

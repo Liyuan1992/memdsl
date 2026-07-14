@@ -19,6 +19,11 @@ def test_v06_public_contract_exports():
     assert memdsl.CATALOG_SCHEMA == "memdsl.catalog.v1"
     assert callable(memdsl.build_memory_catalog)
     assert memdsl.CatalogCursorError is not None
+    # Phase 3 deterministic graph navigation is a new bounded public surface.
+    assert memdsl.TRACE_SCHEMA == "memdsl.trace.v1"
+    assert callable(memdsl.trace_memory)
+    assert memdsl.TraceAnchorError is not None
+    assert memdsl.TraceCursorError is not None
     # 0.6 governed automation and replayable review surfaces
     assert memdsl.POLICY_VERSION == "memdsl.policy.v1"
     assert memdsl.AUTO_APPROVABLE_CAPABILITY == "auto_approvable"

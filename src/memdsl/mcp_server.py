@@ -36,9 +36,11 @@ SERVER_INSTRUCTIONS = (
     "CONFLICT items must be surfaced to the user, and MISSING items are known "
     "gaps. A no_match result is a retry signal, not "
     "proof of absence: check search_trace for filter exclusions, re-query "
-    "with the returned workspace vocabulary, continue the Catalog cursor, or "
+    "with retry_queries/vocabulary_suggestions, continue the Catalog cursor, or "
     "browse memory_list and the "
-    "raw memdsl://file/{file_id} sources. Call memory_explain on a "
+    "raw memdsl://file/{file_id} sources. Use memory_trace for bounded explicit "
+    "incoming/outgoing relation navigation; connectivity is not proof. Call "
+    "memory_explain on a "
     "declaration id before citing it as evidence. Before returning or acting "
     "on a consequential draft, call memory_check; BLOCK forbids the draft and "
     "NEEDS_REVIEW is not approval. memory_propose always passes through the "
@@ -138,6 +140,31 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
             query, kinds=kinds, types=types,
             subject=subject or None, limit=limit)
 
+    @mcp.tool(name="memory_trace")
+    def memory_trace(
+        anchors: List[str],
+        direction: str = "outgoing",
+        relations: Optional[List[str]] = None,
+        max_depth: int = 3,
+        max_nodes: int = 20,
+        max_edges: int = 40,
+        max_bytes: int = 8192,
+        cursor: str = "",
+        include_provisional: bool = False,
+    ) -> dict:
+        """Traverse explicit relations with deterministic BFS and hard depth/node/edge/byte budgets; graph connectivity is not proof."""
+        return svc.trace(
+            anchors,
+            direction=direction,
+            relations=relations,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+            max_bytes=max_bytes,
+            cursor=cursor or None,
+            include_provisional=include_provisional,
+        )
+
     @mcp.tool(name="memory_check")
     def memory_check(
         task: str,
@@ -211,9 +238,11 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
             "user instead of resolving them silently, and state MISSING gaps "
             "rather than guessing. If a query returns no_match, do not "
             "conclude the memory is absent: check search_trace for filter "
-            "exclusions, re-query with the returned vocabulary, continue or "
+            "exclusions and retry_queries/vocabulary_suggestions, continue or "
             "refine memory_catalog, or browse "
-            "memory_list and the raw sources. Call memory_explain before "
+            "memory_list and the raw sources. Use memory_trace to follow "
+            "bounded explicit relations, but never treat connectivity as proof. "
+            "Call memory_explain before "
             "citing any declaration. Before returning a consequential draft, "
             "call memory_check and treat NEEDS_REVIEW as unresolved, not "
             "allowed.\n\n"

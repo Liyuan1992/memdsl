@@ -26,6 +26,12 @@ from memdsl.navigation import (
     CatalogCursorError,
     build_memory_catalog,
 )
+from memdsl.graph import (
+    TRACE_SCHEMA,
+    TraceAnchorError,
+    TraceCursorError,
+    trace_memory,
+)
 from memdsl.policy import (
     AUTO_APPROVABLE_CAPABILITY,
     POLICY_VERSION,
@@ -70,6 +76,10 @@ __all__ = [
     "render_memory_map_text",
     "workspace_vocabulary",
     "build_memory_catalog",
+    "TRACE_SCHEMA",
+    "TraceAnchorError",
+    "TraceCursorError",
+    "trace_memory",
     "CATALOG_SCHEMA",
     "CatalogCursorError",
     "EvidencePack",

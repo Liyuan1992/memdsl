@@ -125,6 +125,38 @@ clients to start with Catalog; legacy clients may continue using Map. Catalog
 does not alter query or compliance: hard constraints are still evaluated by the
 complete authority path, independent of Catalog item/byte budgets.
 
+### Indexed query, vocabulary suggestions, and Trace (Phase 3 source line)
+
+Phase 3 changes candidate selection internally from a full scoring scan to a
+deterministic lexical inverted index. EvidencePack remains
+`memdsl.evidence_pack.v1`: existing layers, scores, tie-breaks, independent
+active/provisional result limits, filter-hidden diagnostics, global MUST rules,
+and compliance completeness are unchanged. `search_trace` additively exposes
+View/source identity, indexes used, exact candidate-pool counts, bounded
+vocabulary suggestions/retry queries, quarantine visibility, and truncation.
+Clients must ignore unknown additive fields as before.
+
+Vocabulary suggestions are folded into query misses rather than published as a
+separate MCP tool. They are lexical and advisory: no Source or alias is written,
+candidate symbols do not redirect, restricted vocabulary is omitted, and an
+ambiguous suggestion produces no automatic retry query.
+
+Trace is an independent new surface:
+
+- Python: `trace_memory()`, `TRACE_SCHEMA = "memdsl.trace.v1"`,
+  `TraceAnchorError`, and `TraceCursorError`;
+- CLI: `memdsl trace PATH... ID [--incoming|--outgoing|--both]`;
+- MCP: `memory_trace`, returning `memdsl.mcp.trace.v1` under `read:search`.
+
+Trace defaults to depth 3, 20 nodes, 40 edges, and 8192 canonical compact UTF-8
+JSON bytes. Stateless cursors bind Source/View, anchors, direction, relation
+filter, depth, provisional visibility, and schema; do not combine pages after
+`cursor_stale` or reuse a cursor with changed request identity. Trace is a BFS
+navigation projection over explicit relations, not proof. No `.mem`, manifest,
+or review-store migration is required. Map v1, query/list/explain/check v1,
+Catalog Phase 2 cursors/budgets, proposal/review/audit, and pending isolation
+remain compatible.
+
 ### MCP propose payload
 
 `memory_propose` now returns `memdsl.mcp.propose.v2`. Successful payloads

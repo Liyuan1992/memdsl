@@ -402,8 +402,11 @@ additively adds `provisional`; scored CONTEXT and PROVISIONAL entries expose
 Hosts may add their own runtime projection fields, but must preserve the
 layers and declaration ids.
 
-The reference scorer remains lexical plus alias resolution. Retrieval
-backends may be replaced without changing EvidencePack semantics.
+The reference scorer remains lexical plus alias resolution, but Phase 3 uses
+a deterministic inverted term index to select scoring candidates. The
+compatibility scorer, tie-break, authority lanes, active/provisional limits,
+global-constraint handling, and filter-hidden diagnostics remain unchanged.
+Retrieval backends may be replaced without changing EvidencePack semantics.
 
 ### 7.1 Retry guidance: search_trace
 
@@ -415,10 +418,18 @@ the filters excluded:
 query_terms                 terms after stopword stripping
 matched_aliases             alias -> resolved symbols found in the query
 filters                     the type/subject filters that were applied
-candidates_considered       declarations scored after filtering
+view_id / source_fingerprint report-only checkout identity
+indexes_used                candidate indexes used by the request
+candidate_pool_total        nonzero lexical candidates before filters
+candidate_pool_after_filters nonzero candidates after filters
+candidates_considered       legacy-compatible searchable count after filtering
 hits                        declarations that scored above zero
 excluded_by_filters         matching declarations a filter hid (up to 5)
 excluded_by_filters_total   total count of filter-hidden matches
+quarantined_matches         permission-safe quarantined matches (empty in report mode)
+vocabulary_suggestions      bounded lexical corrections with source/reason
+retry_queries               deterministic safe retry queries
+truncated                   whether a trace sub-list or result limit truncated detail
 ```
 
 When a filter hides a matching declaration, the pack also reports it under
@@ -430,6 +441,14 @@ PROVISIONAL hits do not suppress active-gap diagnostics. If only provisional
 declarations match, MISSING still reports that no active declaration matched;
 filter-hidden counts and wording likewise refer explicitly to active
 declarations.
+
+When no active scored declaration matches, Phase 3 may add pure-lexical
+vocabulary suggestions from active, unrestricted workspace symbols, aliases,
+types, and modules. Suggestions explain the query term, proposed phrase,
+category, reason, and any symbol ambiguity. They do not edit Source, create an
+alias, or redirect a query automatically. Candidate symbols and declarations
+with a non-empty `access_policy` do not enter this suggestion vocabulary;
+ambiguous suggestions never produce an automatic `retry_query`.
 
 ### 7.2 Navigation: bounded Catalog, legacy memory map, and vocabulary
 
@@ -475,6 +494,34 @@ runtime role, lifecycle status, subject, scope, truncated claim) and include
 workspace vocabulary with aliases. Candidate entries are visibly provisional;
 they are not active authority and their relations cannot hide active entries.
 Map and Catalog are navigation projections, never citation sources.
+
+### 7.3 Deterministic bounded Trace
+
+`trace_memory()` and CLI `memdsl trace` return `memdsl.trace.v1`; MCP
+`memory_trace` returns `memdsl.mcp.trace.v1`. Trace accepts one or more anchors,
+`direction = outgoing | incoming | both`, an optional exact relation filter,
+maximum depth, node/edge/byte budgets, an opaque cursor, and an opt-in
+`include_provisional` flag.
+
+The projection is a deterministic BFS tree over resolved explicit compiler
+edges. Each node is emitted once with its depth, parent edge, lifecycle lane,
+type, role, module, and subject. Non-tree edges are emitted separately as
+`back_edges` (including cycle-closing edges) or `cross_edges`. Adjacency order
+is stable and independent of filesystem order or Python hash seed.
+
+Defaults are depth 3, 20 nodes, 40 edges, and 8192 canonical compact UTF-8 JSON
+bytes. `returned_nodes`, `returned_edges`, exact available counts,
+`truncated`, `completeness`, and `next_cursor` are explicit. The stateless
+cursor binds source fingerprint, view id, anchors, direction, relation filter,
+depth, provisional visibility, schema, and Trace contract. Source/View changes
+return `cursor_stale`; request identity changes return `cursor_mismatch`.
+
+Trace v1 omits declarations with non-empty `access_policy` because Phase 3 has
+no trusted principal API. Provisional nodes are omitted unless explicitly
+requested and remain labeled provisional. Report mode has no quarantined nodes;
+Phase 5 owns enforcement and permission-aware quarantine metadata. Trace
+connectivity records what Source declares; it is not proof of a natural-
+language conclusion and is never a replacement for evidence or explain.
 
 ## 8. CompliancePack
 
@@ -686,9 +733,10 @@ MCP resource memdsl://types
 The memory itself is navigable through:
 
 ```text
-Python       build_memory_catalog / build_memory_map / workspace_vocabulary
+Python       build_memory_catalog / build_memory_map / workspace_vocabulary / trace_memory
 CLI          memdsl catalog <workspace> [...] / memdsl map <workspace> [--json]
-MCP tool     memory_catalog / memory_map
+             memdsl trace <workspace> <anchor> [--incoming|--outgoing|--both]
+MCP tool     memory_catalog / memory_map / memory_trace
 MCP resource memdsl://catalog / memdsl://map
 ```
 
