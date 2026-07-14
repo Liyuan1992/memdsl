@@ -15,7 +15,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from memdsl.authority import current_declarations
-from memdsl.model import Workspace, Declaration
+from memdsl.compiler import WorkspaceInput, ensure_compiled
+from memdsl.model import Declaration
 
 EVIDENCE_PACK_SCHEMA = "memdsl.evidence_pack.v1"
 
@@ -206,28 +207,26 @@ def _scored_sort_key(scored: ScoredDeclaration) -> tuple:
     )
 
 
-def _active_alias_map(ws: Workspace) -> Dict[str, List[str]]:
+def _active_alias_map(ws: WorkspaceInput) -> Dict[str, List[str]]:
     """Aliases trusted for query routing and MUST relevance.
 
     Candidate symbols remain visible in the memory map, but must not redirect
     a query or activate constraints before human confirmation. Keep this
     filter local so the older Workspace.alias_map() API retains its behavior.
     """
+    compiled = ensure_compiled(ws)
+    current_objects = {id(item) for item in current_declarations(compiled)}
     amap: Dict[str, List[str]] = {}
-    for decl in current_declarations(ws):
-        if (decl.runtime_role != "symbol"
-                or decl.status != "active"):
-            continue
-        aliases = decl.fields.get("aliases", [])
-        if not isinstance(aliases, list):
-            continue
-        for alias in aliases:
-            amap.setdefault(str(alias).lower(), []).append(decl.name)
+    for alias, declarations in compiled.aliases.items():
+        for decl in declarations:
+            if id(decl) not in current_objects or decl.status != "active":
+                continue
+            amap.setdefault(alias, []).append(decl.name)
     return amap
 
 
 def build_evidence_pack(
-    ws: Workspace,
+    ws: WorkspaceInput,
     query: str,
     kinds: Optional[List[str]] = None,
     subject: Optional[str] = None,
@@ -235,11 +234,13 @@ def build_evidence_pack(
     types: Optional[List[str]] = None,
 ) -> EvidencePack:
     """Run a query against the workspace and build a layered EvidencePack."""
+    compiled = ensure_compiled(ws)
+    current = current_declarations(compiled)
     pack = EvidencePack(query=query)
     query_terms = _terms(query)
 
     # alias resolution: map query words/phrases to canonical symbols
-    amap = _active_alias_map(ws)
+    amap = _active_alias_map(compiled)
     subject_hits: List[str] = []
     lowered = query.lower()
     for alias, symbols in amap.items():
@@ -251,7 +252,7 @@ def build_evidence_pack(
 
     type_filter = types if types is not None else kinds
     pool = [
-        d for d in current_declarations(ws)
+        d for d in current
         if d.runtime_role != "symbol"
         and d.has_capability("searchable")
     ]
@@ -303,7 +304,7 @@ def build_evidence_pack(
 
     # MUST: constraints that matched, share subject/scope with hits, or are
     # global. Domain types reach this layer through runtime_role.
-    for d in current_declarations(ws):
+    for d in current:
         if d.runtime_role != "constraint" or d.status != "active":
             continue
         relevant = (
@@ -393,13 +394,13 @@ def build_evidence_pack(
     return pack
 
 
-def workspace_vocabulary(ws: Workspace, limit: int = 50) -> dict:
+def workspace_vocabulary(ws: WorkspaceInput, limit: int = 50) -> dict:
     """The words a workspace speaks: subjects, aliases, scopes, types, modules.
 
     A no-match answer is only useful if the agent learns which vocabulary to
     re-ask in; this is that vocabulary, computed from serviceable declarations.
     """
-    active = current_declarations(ws)
+    active = current_declarations(ensure_compiled(ws))
     subjects = []
     for d in active:
         if d.runtime_role != "symbol":
@@ -423,7 +424,7 @@ def workspace_vocabulary(ws: Workspace, limit: int = 50) -> dict:
     }
 
 
-def build_memory_map(ws: Workspace, claim_chars: int = 120) -> dict:
+def build_memory_map(ws: WorkspaceInput, claim_chars: int = 120) -> dict:
     """Compact per-module index of every serviceable declaration.
 
     Designed to sit in an agent's context from turn one -- the agent knows
@@ -432,9 +433,10 @@ def build_memory_map(ws: Workspace, claim_chars: int = 120) -> dict:
     provisional memory cannot masquerade as active authority. Claims are
     truncated and carry no evidence: the map is for navigation, not citation.
     """
+    compiled = ensure_compiled(ws)
     modules: Dict[str, List[dict]] = {}
     total = 0
-    for d in current_declarations(ws):
+    for d in current_declarations(compiled):
         entry: dict = {"id": d.id, "type": d.kind,
                        "runtime_role": d.runtime_role,
                        "status": d.status,
@@ -463,7 +465,7 @@ def build_memory_map(ws: Workspace, claim_chars: int = 120) -> dict:
              "items": items}
             for name, items in sorted(modules.items())
         ],
-        "vocabulary": workspace_vocabulary(ws),
+        "vocabulary": workspace_vocabulary(compiled),
     }
 
 
@@ -524,9 +526,10 @@ def _clip(text: str, max_chars: int) -> str:
     return text[: max_chars - 1] + "…"
 
 
-def explain(ws: Workspace, decl_id: str) -> str:
+def explain(ws: WorkspaceInput, decl_id: str) -> str:
     """Render one declaration with its relations and evidence."""
-    d = ws.by_id(decl_id)
+    compiled = ensure_compiled(ws)
+    d = compiled.first_occurrence(decl_id)
     if d is None:
         return f"declaration '{decl_id}' not found"
     lines = [
@@ -554,14 +557,10 @@ def explain(ws: Workspace, decl_id: str) -> str:
             for t in targets:
                 lines.append(f"    {rel} -> {t}")
     # reverse relations
-    reverse = []
-    for other in ws.declarations:
-        if other.id == d.id:
-            continue
-        for rel, targets in other.relations().items():
-            for t in targets:
-                if t in (d.id, d.name):
-                    reverse.append(f"    {other.id} --{rel}--> this")
+    reverse = [
+        f"    {edge.source_id} --{edge.relation}--> this"
+        for edge in compiled.legacy_incoming(d)
+    ]
     if reverse:
         lines.append("  referenced by:")
         lines.extend(reverse)

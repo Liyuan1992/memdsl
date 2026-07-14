@@ -170,11 +170,22 @@ class Workspace:
         registry: Optional[TypeRegistry] = None,
     ) -> "Workspace":
         """Load one or more `.mem` files or directories (recursive)."""
-        path_list = [str(path) for path in paths]
+        # Path argument order and filesystem traversal order are not semantic.
+        # Normalize both so every path-backed compile sees the same source
+        # occurrence order on Windows, POSIX, and reversed caller input.
+        path_list = sorted(
+            [str(path) for path in paths],
+            key=lambda item: (
+                os.path.normcase(os.path.abspath(item)),
+                os.path.abspath(item),
+                item,
+            ),
+        )
         ws = cls(registry=registry or registry_for_paths(path_list))
         for path in path_list:
             if os.path.isdir(path):
-                for root, _dirs, names in os.walk(path):
+                for root, dirs, names in os.walk(path):
+                    dirs[:] = sorted(dirs)
                     for name in sorted(names):
                         if name.endswith(".mem"):
                             ws.add_document(parse_file(os.path.join(root, name)))

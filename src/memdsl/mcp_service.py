@@ -28,6 +28,11 @@ from typing import Callable, List, Mapping, Optional, Sequence, Union
 
 from memdsl import __version__
 from memdsl.authority import current_declarations
+from memdsl.compiler import (
+    CompiledWorkspace,
+    compile_workspace,
+    source_state_signature,
+)
 from memdsl.compliance import check_compliance
 from memdsl.linter import lint
 from memdsl.model import Workspace, Declaration
@@ -159,7 +164,8 @@ class MemdslMCPService:
         self._staging = staging
         self._review: Optional[ReviewStore] = None
         self._ws: Optional[Workspace] = None
-        self._ws_signature: Optional[tuple] = None
+        self._compiled: Optional[CompiledWorkspace] = None
+        self._ws_signature: Optional[str] = None
 
     @property
     def review_store(self) -> ReviewStore:
@@ -173,35 +179,46 @@ class MemdslMCPService:
         files: List[str] = []
         for path in self.workspace_paths:
             if os.path.isdir(path):
-                for root, _dirs, names in os.walk(path):
+                for root, dirs, names in os.walk(path):
+                    dirs[:] = sorted(dirs)
                     for name in sorted(names):
                         if name.endswith(".mem"):
                             files.append(os.path.join(root, name))
             elif path.endswith(".mem"):
                 files.append(path)
-        return files
+        return sorted(files, key=lambda item: (os.path.normcase(item), item))
 
     def workspace(self) -> Workspace:
-        """Load the workspace, reloading when any `.mem` file changes."""
-        signature = []
-        tracked_files = list(self.mem_files())
-        if self._ws is not None:
-            tracked_files.extend(self._ws.registry.schema_files)
-            for path in self.workspace_paths:
-                root = path if os.path.isdir(path) else os.path.dirname(path)
-                manifest = os.path.join(root, "memdsl.json")
-                if os.path.isfile(manifest):
-                    tracked_files.append(manifest)
-        for f in sorted(set(tracked_files)):
-            try:
-                signature.append((f, os.path.getmtime(f), os.path.getsize(f)))
-            except OSError:
-                signature.append((f, 0.0, -1))
-        signature = tuple(signature)
+        """Load source and compiled indexes, reloading on any source change."""
+        signature = source_state_signature(
+            self.workspace_paths,
+            extra_schema_files=(
+                self._ws.registry.schema_files if self._ws is not None else ()),
+        )
         if self._ws is None or signature != self._ws_signature:
-            self._ws = Workspace.load(self.workspace_paths)
+            workspace = Workspace.load(self.workspace_paths)
+            compiled = compile_workspace(
+                workspace, paths=self.workspace_paths)
+            # Recompute after schema discovery so an external schema removal
+            # or manifest retarget is part of the next invalidation check.
+            signature = source_state_signature(
+                self.workspace_paths,
+                extra_schema_files=workspace.registry.schema_files,
+            )
+            self._ws = workspace
+            self._compiled = compiled
             self._ws_signature = signature
         return self._ws
+
+    def compiled_workspace(self) -> CompiledWorkspace:
+        """Return the cached internal compile for the live source workspace."""
+        workspace = self.workspace()
+        if self._compiled is None or self._compiled.workspace is not workspace:
+            # Tests and embedded hosts may replace ``workspace()`` with a pure
+            # in-memory provider.  Compile that object without inventing paths.
+            paths = self.workspace_paths if workspace is self._ws else ()
+            self._compiled = compile_workspace(workspace, paths=paths)
+        return self._compiled
 
     def require_scope(self, scope: str) -> None:
         if scope not in self.scopes and "all" not in self.scopes:
@@ -319,10 +336,11 @@ class MemdslMCPService:
         self.require_scope(SUMMARY_SCOPE)
         schema = "memdsl.mcp.status.v1"
         try:
-            ws = self.workspace()
+            compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
-        current = current_declarations(ws)
+        ws = compiled.workspace
+        current = current_declarations(compiled)
         kinds: dict = {}
         for d in ws.declarations:
             kinds[d.kind] = kinds.get(d.kind, 0) + 1
@@ -387,8 +405,8 @@ class MemdslMCPService:
                 if declaration.status != "active"),
             "kinds": dict(sorted(kinds.items())),
             "types": dict(sorted(kinds.items())),
-            "registered_types": self._ws.registry.names(),
-            "schema_files": list(self._ws.registry.schema_files),
+            "registered_types": ws.registry.names(),
+            "schema_files": list(ws.registry.schema_files),
             "scopes": sorted(self.scopes),
             "resources": list(RESOURCE_URIS),
             "tools": list(TOOL_NAMES),
@@ -416,10 +434,10 @@ class MemdslMCPService:
         self.require_scope(SUMMARY_SCOPE)
         schema = "memdsl.mcp.map.v1"
         try:
-            ws = self.workspace()
+            compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
-        map_data = build_memory_map(ws)
+        map_data = build_memory_map(compiled)
         return {
             "ok": True,
             "schema_version": schema,
@@ -462,12 +480,12 @@ class MemdslMCPService:
                 "next_actions": ["Provide a non-empty query."],
             }
         try:
-            ws = self.workspace()
+            compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
         limit = _clamp_int(limit, 1, 50, 8)
         pack = build_evidence_pack(
-            ws, query_text,
+            compiled, query_text,
             kinds=list(kinds) if kinds else None,
             types=list(types) if types else None,
             subject=subject or None,
@@ -513,7 +531,7 @@ class MemdslMCPService:
                 "(see vocabulary.subjects/aliases/scopes/types), or call "
                 "memory_list to browse declarations."
             )
-            payload["vocabulary"] = workspace_vocabulary(ws)
+            payload["vocabulary"] = workspace_vocabulary(compiled)
         return payload
 
     def explain(self, decl_id: str) -> dict:
@@ -529,10 +547,10 @@ class MemdslMCPService:
                 "next_actions": ["Pass a declaration id (type:name or name)."],
             }
         try:
-            ws = self.workspace()
+            compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
-        d = ws.by_id(ref)
+        d = compiled.first_occurrence(ref)
         if d is None:
             return {
                 "ok": False,
@@ -541,14 +559,10 @@ class MemdslMCPService:
                 "id": ref,
                 "next_actions": ["Call memory_list to browse available declaration ids."],
             }
-        referenced_by = []
-        for other in ws.declarations:
-            if other.id == d.id:
-                continue
-            for rel, targets in other.relations().items():
-                for t in targets:
-                    if t in (d.id, d.name):
-                        referenced_by.append({"id": other.id, "relation": rel})
+        referenced_by = [
+            {"id": edge.source_id, "relation": edge.relation}
+            for edge in compiled.legacy_incoming(d)
+        ]
         return {
             "ok": True,
             "schema_version": schema,
@@ -576,7 +590,7 @@ class MemdslMCPService:
                 "evidence": d.evidence or {},
                 "fields": {k: v for k, v in d.fields.items() if k != "evidence"},
             },
-            "rendered_text": explain_text(ws, ref),
+            "rendered_text": explain_text(compiled, ref),
             "boundary": (
                 "evidence.quote and source anchor this declaration to its origin; "
                 "cite the declaration id, do not paraphrase it as your own inference."
@@ -608,11 +622,11 @@ class MemdslMCPService:
                 ],
             }
         try:
-            ws = self.workspace()
+            compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
         pack = check_compliance(
-            ws, task_text, candidate_text,
+            compiled, task_text, candidate_text,
             subject=subject or None,
             scope=scope or None,
             exceptions=list(exceptions or []),
@@ -652,11 +666,14 @@ class MemdslMCPService:
         self.require_scope(SUMMARY_SCOPE)
         schema = "memdsl.mcp.list.v1"
         try:
-            ws = self.workspace()
+            compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
         limit = _clamp_int(limit, 1, 500, 100)
-        pool = ws.declarations if include_inactive else current_declarations(ws)
+        pool = (
+            compiled.declarations
+            if include_inactive else current_declarations(compiled)
+        )
         items = []
         for d in pool:
             requested_type = memory_type or kind
@@ -691,18 +708,18 @@ class MemdslMCPService:
         self.require_scope(SUMMARY_SCOPE)
         schema = "memdsl.mcp.types.v1"
         try:
-            ws = self.workspace()
+            compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
         items = []
-        for descriptor in ws.registry.descriptors():
+        for descriptor in compiled.registry.descriptors():
             items.append(descriptor.as_dict())
         return {
             "ok": True,
             "schema_version": schema,
             "status": "ok",
             "total": len(items),
-            "schema_files": list(ws.registry.schema_files),
+            "schema_files": list(compiled.registry.schema_files),
             "types": items,
             "next_actions": [
                 "Choose a loaded domain type whose runtime_role and required_fields match the memory being proposed.",
@@ -713,9 +730,10 @@ class MemdslMCPService:
         self.require_scope(SUMMARY_SCOPE)
         schema = "memdsl.mcp.lint.v1"
         try:
-            ws = self.workspace()
+            compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
+        ws = compiled.workspace
         diags = lint(ws)
         errors = sum(1 for d in diags if d.severity == "error")
         warnings = sum(1 for d in diags if d.severity == "warning")

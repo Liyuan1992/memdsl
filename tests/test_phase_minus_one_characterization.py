@@ -239,7 +239,7 @@ def test_unknown_relation_key_is_silently_dropped() -> None:
 
 @pytest.mark.xfail(
     strict=True,
-    reason="Phase 0B/1: one resolver must reject ambiguous and wrongly prefixed refs",
+    reason="Phase 1: compiler resolver exists; full reference diagnostics must fail loud",
 )
 def test_reference_resolution_must_fail_loud_consistently() -> None:
     ws = workspace_from_fixture("reference_resolution.mem")
@@ -267,7 +267,7 @@ def test_duplicate_full_id_is_lint_error_but_read_paths_serve_both_and_first(
 
 @pytest.mark.xfail(
     strict=True,
-    reason="Phase 0B/1: duplicate identity cannot be silently reduced to first occurrence",
+    reason="Phase 1: occurrences are preserved; duplicate identity must gate serving",
 )
 def test_duplicate_full_id_must_not_be_served_as_a_single_resolved_declaration(
 ) -> None:
