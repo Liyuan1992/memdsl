@@ -73,7 +73,11 @@ adds `provisional`. Only active declarations enter `must`, `should`,
 `runtime_role`, and lifecycle.
 
 Candidate symbols cannot affect alias resolution, and candidate constraints
-cannot enter MUST or deterministic compliance.
+cannot enter MUST or deterministic compliance. Candidate, retracted, and
+archived declarations also cannot use `supersedes` to hide an active target.
+The v0.6 read functions share one narrow authority resolver: full ids match
+exactly, bare references must be unique, and only an active source relation can
+exclude the resolved target.
 
 Serialized packs also expose `search_trace` so a miss carries enough
 information to retry instead of looking like absence.
@@ -86,9 +90,10 @@ text = render_memory_map_text(map_data)
 vocab = workspace_vocabulary(workspace)
 ```
 
-The map is a navigation projection. It includes every serviceable declaration
-and makes lifecycle status explicit; candidate entries are provisional, not
-active authority. Items carry no evidence and claims are truncated, so the map
+The map is a navigation projection. It includes the shared current service set
+after lifecycle-safe supersede exclusion and makes lifecycle status explicit;
+candidate entries are provisional, not active authority. `workspace_vocabulary`
+uses the same set. Items carry no evidence and claims are truncated, so the map
 is never a citation source.
 
 ## Governed write path
@@ -311,7 +316,10 @@ historical decisions.
 A post-review `flag` records a human quality result but does not edit source.
 Correction requires a new schema-valid declaration proposal whose
 `supersedes` relation points to the old declaration. Promotion and revision
-use the same append-only mechanism, optionally adding `revision_of`.
+use the same append-only mechanism, optionally adding `revision_of`. The new
+declaration must be lifecycle `active` before its uniquely resolved
+`supersedes` relation has authority; human approval does not silently rewrite
+candidate lifecycle state or the old declaration's status.
 
 ReviewStore does not create Git commits. Hosts may integrate Git, but atomic
 approval, audit replay, and correction semantics do not depend on it.
@@ -321,4 +329,7 @@ approval, audit replay, and correction semantics do not depend on it.
 Patch releases in the 0.6 line will not remove these root exports or change
 the authority meaning of EvidencePack layers. `provisional` is additive to
 `memdsl.evidence_pack.v1`; breaking serialized schema changes require a new
-schema id.
+schema id. The lifecycle-safe supersede resolver is a correctness/security fix
+to that existing authority promise: code that relied on candidate, retracted,
+archived, ambiguous, duplicate, or wrongly prefixed supersedes hiding a target
+was relying on unintended behavior.

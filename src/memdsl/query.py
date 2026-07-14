@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from memdsl.authority import current_declarations
 from memdsl.model import Workspace, Declaration
 
 EVIDENCE_PACK_SCHEMA = "memdsl.evidence_pack.v1"
@@ -212,13 +213,10 @@ def _active_alias_map(ws: Workspace) -> Dict[str, List[str]]:
     a query or activate constraints before human confirmation. Keep this
     filter local so the older Workspace.alias_map() API retains its behavior.
     """
-    superseded = ws.superseded_ids()
     amap: Dict[str, List[str]] = {}
-    for decl in ws.active():
+    for decl in current_declarations(ws):
         if (decl.runtime_role != "symbol"
-                or decl.status != "active"
-                or decl.id in superseded
-                or decl.name in superseded):
+                or decl.status != "active"):
             continue
         aliases = decl.fields.get("aliases", [])
         if not isinstance(aliases, list):
@@ -251,13 +249,11 @@ def build_evidence_pack(
         subject_hits.append(subject)
     pack.resolved_subjects = sorted(set(subject_hits))
 
-    superseded = ws.superseded_ids()
     type_filter = types if types is not None else kinds
     pool = [
-        d for d in ws.active()
+        d for d in current_declarations(ws)
         if d.runtime_role != "symbol"
         and d.has_capability("searchable")
-        and d.id not in superseded and d.name not in superseded
     ]
     candidates = [
         d for d in pool
@@ -307,10 +303,8 @@ def build_evidence_pack(
 
     # MUST: constraints that matched, share subject/scope with hits, or are
     # global. Domain types reach this layer through runtime_role.
-    for d in ws.active():
+    for d in current_declarations(ws):
         if d.runtime_role != "constraint" or d.status != "active":
-            continue
-        if d.id in superseded or d.name in superseded:
             continue
         relevant = (
             d.id in hit_ids
@@ -405,7 +399,7 @@ def workspace_vocabulary(ws: Workspace, limit: int = 50) -> dict:
     A no-match answer is only useful if the agent learns which vocabulary to
     re-ask in; this is that vocabulary, computed from serviceable declarations.
     """
-    active = ws.active()
+    active = current_declarations(ws)
     subjects = []
     for d in active:
         if d.runtime_role != "symbol":
@@ -438,12 +432,9 @@ def build_memory_map(ws: Workspace, claim_chars: int = 120) -> dict:
     provisional memory cannot masquerade as active authority. Claims are
     truncated and carry no evidence: the map is for navigation, not citation.
     """
-    superseded = ws.superseded_ids()
     modules: Dict[str, List[dict]] = {}
     total = 0
-    for d in ws.active():
-        if d.id in superseded or d.name in superseded:
-            continue
+    for d in current_declarations(ws):
         entry: dict = {"id": d.id, "type": d.kind,
                        "runtime_role": d.runtime_role,
                        "status": d.status,

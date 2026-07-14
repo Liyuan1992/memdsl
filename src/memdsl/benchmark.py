@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, Iterable, List
 
+from memdsl.authority import current_declarations
 from memdsl.compliance import check_compliance
 from memdsl.model import Workspace
 from memdsl.query import build_evidence_pack
@@ -82,11 +83,8 @@ def _terms(text: str) -> set:
 def _flat_context_prediction(ws: Workspace, case: ComplianceCase) -> dict:
     query_terms = _terms(case.task + " " + case.candidate)
     ids = []
-    superseded = ws.superseded_ids()
-    for decl in ws.active():
+    for decl in current_declarations(ws):
         if decl.runtime_role != "constraint":
-            continue
-        if decl.id in superseded or decl.name in superseded:
             continue
         if query_terms & _terms(decl.searchable_text()):
             ids.append(decl.id)

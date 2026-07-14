@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from memdsl.authority import authoritative_superseded_ids
 from memdsl.compliance import check_compliance
 from memdsl.linter import lint
 from memdsl.mcp_service import MemdslMCPService
@@ -81,63 +82,44 @@ def test_map_query_and_explain_payload_snapshots() -> None:
         ("authority_archived.mem", "fact:topic.archived_override"),
     ],
 )
-def test_non_authoritative_superseders_currently_hide_active_target(
+def test_non_authoritative_superseders_must_not_hide_active_target(
     fixture_name: str,
     superseder_id: str,
 ) -> None:
     ws = workspace_from_fixture(fixture_name)
+    pack = build_evidence_pack(ws, "synthetic beacon active")
 
     assert ws.by_id(superseder_id) is not None
-    assert "fact:topic.current" not in map_ids(ws)
-    assert "topic.current" in ws.superseded_ids()
+    assert "fact:topic.current" in map_ids(ws)
+    assert "fact:topic.current" not in authoritative_superseded_ids(ws)
+    assert [item.declaration.id for item in pack.context] == [
+        "fact:topic.current"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 0A: non-active superseders must have no authority effect",
-)
-@pytest.mark.parametrize(
-    "fixture_name",
-    [
-        "authority_candidate_fact.mem",
-        "authority_retracted.mem",
-        "authority_archived.mem",
-    ],
-)
-def test_non_authoritative_superseders_must_not_hide_active_target(
-    fixture_name: str,
+@pytest.mark.parametrize("superseder_status", ["candidate", "retracted", "archived"])
+def test_non_authoritative_supersedes_global_constraint_must_remain_blocked(
+    superseder_status: str,
 ) -> None:
-    assert "fact:topic.current" in map_ids(workspace_from_fixture(fixture_name))
-
-
-def test_candidate_supersedes_global_constraint_currently_changes_block_to_allow(
-) -> None:
-    ws = workspace_from_fixture("authority_candidate_constraint.mem")
-    without_candidate = Workspace()
+    source = fixture_text("authority_candidate_constraint.mem").replace(
+        "status: candidate", f"status: {superseder_status}")
+    ws = Workspace()
+    ws.add_document(parse_text(
+        source, file=f"<phase-minus-one/constraint-{superseder_status}.mem>"))
+    active_only_workspace = Workspace()
     active_only = next(
         d for d in ws.declarations if d.id == "boundary:safety.no_ember")
-    without_candidate.declarations.append(active_only)
+    active_only_workspace.declarations.append(active_only)
 
+    query_pack = build_evidence_pack(ws, "synthetic ember token")
     before = check_compliance(
-        without_candidate, "Publish a synthetic note", "Include ember-token.")
+        active_only_workspace, "Publish a synthetic note", "Include ember-token.")
     after = check_compliance(
         ws, "Publish a synthetic note", "Include ember-token.")
 
+    assert [d.id for d in query_pack.must] == ["boundary:safety.no_ember"]
     assert before.verdict == "block"
-    assert after.verdict == "allow"
-    assert after.applicable_must == []
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 0A: candidate supersedes cannot bypass an active hard rule",
-)
-def test_candidate_supersedes_global_constraint_must_remain_blocked() -> None:
-    ws = workspace_from_fixture("authority_candidate_constraint.mem")
-    pack = check_compliance(
-        ws, "Publish a synthetic note", "Include ember-token.")
-    assert pack.verdict == "block"
-    assert [d.id for d in pack.applicable_must] == ["boundary:safety.no_ember"]
+    assert after.verdict == "block"
+    assert [d.id for d in after.applicable_must] == ["boundary:safety.no_ember"]
 
 
 def test_supersedes_fork_currently_has_no_fork_diagnostic() -> None:
@@ -174,28 +156,6 @@ def test_supersedes_cycle_must_fail_loud_without_applying_exclusion() -> None:
     assert any("cycle" in item.message.lower() for item in lint(ws, today=TODAY))
 
 
-def test_map_list_status_and_vocabulary_use_different_current_sets(
-    tmp_path: Path,
-) -> None:
-    source = fixture_text("revision_fork.mem")
-    (tmp_path / "memory.mem").write_text(source, encoding="utf-8")
-    service = MemdslMCPService([str(tmp_path)])
-
-    memory_map = service.memory_map()
-    listing = service.list_declarations()
-    status = service.status()
-    vocabulary = memory_map["vocabulary"]
-
-    assert memory_map["declarations"] == 2
-    assert listing["total"] == 3
-    assert status["active_declarations"] == 3
-    assert vocabulary["types"]["fact"] == 3
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 0A: authority-bearing surfaces need one current-set resolver",
-)
 def test_map_list_status_and_vocabulary_must_share_current_set(
     tmp_path: Path,
 ) -> None:
@@ -216,14 +176,40 @@ def test_map_list_status_and_vocabulary_must_share_current_set(
     assert len(counts) == 1
 
 
-def test_bare_reference_ambiguity_currently_hides_every_matching_name() -> None:
+def test_ambiguous_bare_reference_has_no_authority_effect() -> None:
     ws = workspace_from_fixture("reference_resolution.mem")
     remaining = set(map_ids(ws))
 
     assert "ambiguous_relation_target" not in codes(ws)
-    assert "fact:shared" not in remaining
-    assert "decision:shared" not in remaining
+    assert "fact:shared" in remaining
+    assert "decision:shared" in remaining
     assert "fact:bare.successor" in remaining
+
+
+@pytest.mark.parametrize("target_reference", ["topic.old", "fact:topic.old"])
+def test_active_unique_supersedes_keeps_append_only_revision_compatibility(
+    target_reference: str,
+) -> None:
+    ws = Workspace()
+    ws.add_document(parse_text(f'''
+fact topic.old {{
+  claim: "Old synthetic route."
+  lifecycle {{ status: active }}
+  evidence {{ source: synthetic_log quote: "Old route." }}
+}}
+
+fact topic.new {{
+  claim: "New synthetic route."
+  lifecycle {{ status: active }}
+  relations {{ supersedes: "{target_reference}" }}
+  evidence {{ source: synthetic_log quote: "New route." }}
+}}
+''', file="<phase-minus-one/linear-revision.mem>"))
+
+    assert authoritative_superseded_ids(ws) == {"fact:topic.old"}
+    assert map_ids(ws) == ["fact:topic.new"]
+    pack = build_evidence_pack(ws, "synthetic route")
+    assert [item.declaration.id for item in pack.context] == ["fact:topic.new"]
 
 
 def test_wrong_kind_prefix_passes_lint_but_does_not_link_at_runtime() -> None:

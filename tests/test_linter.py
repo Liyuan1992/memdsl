@@ -122,7 +122,7 @@ entity User.JobB { kind: Employment canonical_name: "B" aliases: ["work"] status
     assert "ambiguous_alias" in codes(ws)
 
 
-def test_unmarked_supersede_status():
+def test_append_only_supersedes_does_not_require_target_status_rewrite():
     ws = ws_from(ENTITY + """
 decision d.old {
   subject: User
@@ -138,4 +138,4 @@ decision d.new {
   evidence { source: chat quote: "y" }
 }
 """)
-    assert "unmarked_supersede_status" in codes(ws)
+    assert "unmarked_supersede_status" not in codes(ws)

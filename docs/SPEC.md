@@ -228,7 +228,8 @@ Lifecycle status is an authority boundary. Only `active` declarations may
 enter MUST, SHOULD, CONTEXT, MISSING, alias resolution, or deterministic
 compliance. A non-active declaration that remains serviceable and searchable
 may appear only under PROVISIONAL. In particular, a candidate constraint is
-never an enforceable MUST rule.
+never an enforceable MUST rule, and relations declared by candidate,
+retracted, or archived declarations cannot change active authority.
 
 ### 4.5 Access policy
 
@@ -254,7 +255,13 @@ supports  refines  depends_on  part_of  supersedes
 conflicts_with  derived_from  related_to  revision_of
 ```
 
-`supersedes` removes the target from default query results.
+`supersedes` removes the target from default read results only when the source
+declaration is lifecycle `active` and the target resolves uniquely. A full id
+must match exactly; a bare name resolves only when exactly one declaration has
+that name. Ambiguous, duplicate, dangling, or wrongly prefixed targets have no
+authority effect. This is the shared v0.6 correctness rule used by map, query,
+compliance, list, status authority counts, and vocabulary. It is not the
+proposed CompiledWorkspace or ResolvedView contract.
 `conflicts_with` keeps both declarations visible under CONFLICT.
 
 ## 5. Extensible type system
@@ -422,14 +429,15 @@ declarations.
 ### 7.2 Navigation: memory map and vocabulary
 
 Agent-driven reading needs an index the agent can hold in context before it
-queries. `build_memory_map` produces a compact per-module index of every
-serviceable declaration (id, type, runtime role, lifecycle status, subject,
-scope, truncated claim) plus the workspace vocabulary (`subjects` with
-aliases, `scopes`, `modules`, `types`). Candidate entries are visibly
-provisional; they are not active authority. `workspace_vocabulary` is also
-returned on no-match MCP queries so an agent can re-ask in the workspace's
-own words. The map is a navigation projection, never a citation source:
-items carry no evidence and claims are truncated.
+queries. `build_memory_map` produces a compact per-module index of the shared
+current service set after lifecycle-safe supersede exclusion (id, type,
+runtime role, lifecycle status, subject, scope, truncated claim) plus the
+workspace vocabulary (`subjects` with aliases, `scopes`, `modules`, `types`).
+Candidate entries are visibly provisional; they are not active authority and
+their relations cannot hide active entries. `workspace_vocabulary` is also
+returned on no-match MCP queries so an agent can re-ask in the workspace's own
+words. The map is a navigation projection, never a citation source: items
+carry no evidence and claims are truncated.
 
 ## 8. CompliancePack
 
@@ -485,6 +493,11 @@ Universal diagnostics include:
 
 The standard compatibility pack may preserve older diagnostic aliases such
 as `boundary_without_exception` and `stale_state`.
+
+The former `unmarked_supersede_status` warning is not emitted. Append-only
+correction intentionally leaves the old declaration unchanged; currentness is
+derived from an authoritative incoming `supersedes` relation rather than an
+in-place `status: superseded` rewrite.
 
 ## 10. Gated writing and review
 
@@ -592,10 +605,12 @@ ReviewStore does not create Git commits and does not physically delete or
 rewrite approved declarations. Promotion, revision, and retraction use a new,
 schema-valid declaration proposal with a new id and `supersedes` (optionally
 also `revision_of`) pointing at the old declaration. Those relations always
-require human review. Once approved, the existing supersession semantics hide
-the old declaration from default query while preserving source and audit
-history. A host may add Git integration, but core correctness does not depend
-on Git.
+require human review. Once approved, an `active` successor with a uniquely
+resolved target hides the old declaration from default read surfaces while
+preserving source and audit history. Approval does not silently promote a
+candidate lifecycle status, so a candidate successor remains PROVISIONAL and
+has no supersede authority. A host may add Git integration, but core
+correctness does not depend on Git.
 
 The supported top-level Python surface includes `ReviewStore`, `Proposal`,
 `ValidationResult`, `AuditLogError`, `ReviewPolicy`, `PolicyRule`,
@@ -658,7 +673,7 @@ constraint recall, citation accuracy, and per-case results. The v0.4
 - Types are discoverable and versioned.
 - Vector search is a backend, not the memory model.
 - Candidate memory is visible only as PROVISIONAL and never acquires active
-  behavioral authority.
+  behavioral authority; its relations cannot remove active authority either.
 - Automation requires independently attested identity and evidence; proposal
   content cannot attest to itself.
 - Source declarations and append-only review history are authoritative.

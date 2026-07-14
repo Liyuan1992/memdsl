@@ -101,6 +101,13 @@ Every searchable non-active hit is isolated under PROVISIONAL, regardless of
 runtime role. Candidate symbols cannot redirect queries, and candidate
 constraints cannot enter MUST or compliance.
 
+The same authority boundary applies to relations. A `supersedes` relation can
+hide a target only when its source is active and its full-id or unique bare
+target resolves exactly. Candidate, retracted, archived, ambiguous, duplicate,
+or wrongly prefixed superseders cannot change query, MUST, or compliance. This
+is a 0.6-line correctness/security fix; it does not introduce the proposed
+CompiledWorkspace or ResolvedView architecture.
+
 The core also understands capabilities such as `requires_evidence`,
 `searchable`, `temporal`, `enforceable`, `guardable`,
 `exceptions_recommended`, and the explicit review opt-in
@@ -404,7 +411,9 @@ cursors, and no-op events remain append-only.
 
 A post-review `flag` does not silently delete memory. Promotion, revision,
 and retraction require a new human-reviewed declaration with a new id and
-`supersedes` (optionally `revision_of`) pointing to the old declaration.
+`supersedes` (optionally `revision_of`) pointing to the old declaration. The
+successor must be lifecycle `active` before the relation has authority; the old
+declaration does not need an in-place `status: superseded` rewrite.
 ReviewStore does not create Git commits; hosts may add Git integration without
 making core correctness depend on it.
 
@@ -563,6 +572,12 @@ v0.6 保留 v0.5 引入的两层类型架构，并加入 lifecycle 安全的 pro
 任何 searchable 的非 active 命中都只进入 PROVISIONAL，不论 runtime role。
 candidate symbol 不能重定向查询，candidate constraint 不能进入 MUST 或
 compliance。
+
+同一 authority 边界也适用于关系。只有 source 为 active，且 full id 精确匹配或
+bare ref 唯一解析时，`supersedes` 才能隐藏 target。candidate、retracted、
+archived、歧义、重复或错误 kind 前缀的 superseder 都不能改变 query、MUST 或
+compliance。这是 0.6 线的 correctness/security 修复，不代表提案中的
+CompiledWorkspace 或 ResolvedView 已经实现。
 
 底层还识别 `requires_evidence`、`searchable`、`temporal`、
 `enforceable`、`guardable`、`exceptions_recommended`，以及显式审核
@@ -841,7 +856,9 @@ result = store.submit(
 cursor 和 no-op 事件都保持 append-only。
 
 post-review `flag` 不会静默删除记忆。晋升、修订和撤销都要提交一条新 id 的
-人工审核声明，用 `supersedes`（可同时用 `revision_of`）指向旧声明。
+人工审核声明，用 `supersedes`（可同时用 `revision_of`）指向旧声明。successor
+必须是 lifecycle `active` 才获得关系 authority；旧声明不需要原地改成
+`status: superseded`。
 ReviewStore 不创建 Git commit；宿主可以增加 Git 集成，但核心正确性不依赖 Git。
 
 ### 包里有什么

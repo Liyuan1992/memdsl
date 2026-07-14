@@ -27,6 +27,7 @@ import os
 from typing import Callable, List, Mapping, Optional, Sequence, Union
 
 from memdsl import __version__
+from memdsl.authority import current_declarations
 from memdsl.compliance import check_compliance
 from memdsl.linter import lint
 from memdsl.model import Workspace, Declaration
@@ -321,6 +322,7 @@ class MemdslMCPService:
             ws = self.workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
+        current = current_declarations(ws)
         kinds: dict = {}
         for d in ws.declarations:
             kinds[d.kind] = kinds.get(d.kind, 0) + 1
@@ -378,10 +380,10 @@ class MemdslMCPService:
             "files": len(ws.files),
             "declarations": len(ws.declarations),
             "active_declarations": sum(
-                1 for declaration in ws.active()
+                1 for declaration in current
                 if declaration.status == "active"),
             "provisional_declarations": sum(
-                1 for declaration in ws.active()
+                1 for declaration in current
                 if declaration.status != "active"),
             "kinds": dict(sorted(kinds.items())),
             "types": dict(sorted(kinds.items())),
@@ -654,7 +656,7 @@ class MemdslMCPService:
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
         limit = _clamp_int(limit, 1, 500, 100)
-        pool = ws.declarations if include_inactive else ws.active()
+        pool = ws.declarations if include_inactive else current_declarations(ws)
         items = []
         for d in pool:
             requested_type = memory_type or kind

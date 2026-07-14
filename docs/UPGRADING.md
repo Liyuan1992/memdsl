@@ -42,6 +42,34 @@ Hosts that assumed every item returned by `Workspace.active()` had
 meaning of serviceable/non-excluded. Apply an explicit status check when
 building an authority-bearing projection.
 
+### Supersedes authority correctness fix
+
+The 0.6 line now enforces the lifecycle boundary for authority-changing
+`supersedes` relations. This is a correctness/security fix to the existing
+PROVISIONAL contract, not a CompiledWorkspace or ResolvedView release.
+
+- Only lifecycle `active` source declarations can create supersede authority.
+- Candidate, retracted, and archived sources cannot hide an active target or
+  remove it from MUST, query, or compliance.
+- Full target ids must match exactly. Bare references have authority only when
+  exactly one declaration has that name. Ambiguous, duplicate, dangling, and
+  wrongly prefixed targets have no authority effect.
+- Map, query, compliance, default list, status authority counts, and workspace
+  vocabulary use the same current service set.
+- `unmarked_supersede_status` is no longer emitted. Append-only correction does
+  not require rewriting the old declaration to `status: superseded`.
+
+An active, structurally valid successor with a uniquely resolved target keeps
+the existing append-only behavior: it hides the old declaration from default
+read surfaces while preserving source and audit history. Human approval does
+not itself promote `status: candidate`; the approved successor must be active
+to gain this authority.
+
+Workspaces that relied on a non-active or ambiguous superseder changing read or
+compliance results will observe a deliberate behavior correction. There is no
+source migration and no legacy flag: make the reviewed successor active and
+use an exact full id or unique bare reference.
+
 ### MCP propose payload
 
 `memory_propose` now returns `memdsl.mcp.propose.v2`. Successful payloads
@@ -128,7 +156,8 @@ memdsl review audit memory PROPOSAL_ID --verdict flag \
 A flag is an audit result, not an in-place deletion. To confirm, revise, or
 retract memory, submit a new schema-valid declaration with a new id and
 `supersedes` pointing to the old declaration; add `revision_of` when
-appropriate. That proposal always requires human review.
+appropriate. That proposal always requires human review, and its supersede
+effect begins only when the approved declaration is lifecycle `active`.
 
 ReviewStore does not create Git commits. Do not build rollback correctness on
 an assumption that one approval equals one Git commit.

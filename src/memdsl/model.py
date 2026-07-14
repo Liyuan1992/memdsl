@@ -237,7 +237,11 @@ class Workspace:
         return [d for d in self.declarations if d.status not in EXCLUDED_STATUSES]
 
     def superseded_ids(self) -> set:
-        """Ids/names of declarations that a newer declaration supersedes."""
+        """Raw declared supersede target references, without authority rules.
+
+        Read and enforcement surfaces must use ``memdsl.authority`` instead;
+        this compatibility helper intentionally preserves source observation.
+        """
         out = set()
         for d in self.declarations:
             for target in d.relations().get("supersedes", []):

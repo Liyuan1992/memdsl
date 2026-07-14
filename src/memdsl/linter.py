@@ -12,7 +12,6 @@ Implements the v0.5 schema-driven rule set from the spec:
     unknown_type_field          error    strict type schema does not allow a field
     type_force_mismatch         warning  force is outside the type schema policy
     stale_memory                warning  temporal memory is expired or too old
-    unmarked_supersede_status   warning  superseded target not marked superseded
     module_too_large            warning  module exceeds declaration budget
     invalid_guard               error    guard is not a nested block
     invalid_guard_regex         error    guard contains an invalid regex
@@ -79,7 +78,6 @@ def lint(ws: Workspace, today: Optional[_dt.date] = None) -> List[Diagnostic]:
     today = today or _dt.date.today()
     diags: List[Diagnostic] = []
     known = ws.known_names() | ws.known_symbols()
-    superseded_targets = ws.superseded_ids()
 
     # duplicate ids
     seen_ids = {}
@@ -285,16 +283,6 @@ def lint(ws: Workspace, today: Optional[_dt.date] = None) -> List[Diagnostic]:
                         f"memory '{d.id}' access policy has unknown field(s): "
                         f"{', '.join(unknown_access)}",
                         d.file, d.line, d.id))
-
-    # superseded targets whose status is not updated
-    for target in superseded_targets:
-        td = ws.by_id(target)
-        if td is not None and td.status not in ("superseded", "retracted", "archived"):
-            diags.append(Diagnostic(
-                "unmarked_supersede_status", "warning",
-                f"'{td.id}' is superseded by a newer declaration but its "
-                f"status is '{td.status}'; mark it status: superseded",
-                td.file, td.line, td.id))
 
     # module size budget
     per_module = {}

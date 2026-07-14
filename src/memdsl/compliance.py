@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
 
+from memdsl.authority import current_declarations
 from memdsl.model import Declaration, Workspace
 
 
@@ -185,11 +186,8 @@ def applicable_constraints(
     query = "\n".join(part for part in (task, candidate) if part).strip()
     query_terms = _terms(query)
     selected: Dict[str, Declaration] = {}
-    superseded = ws.superseded_ids()
-    for decl in ws.active():
+    for decl in current_declarations(ws):
         if decl.runtime_role != "constraint" or decl.status != "active":
-            continue
-        if decl.id in superseded or decl.name in superseded:
             continue
         if decl.scope == "global":
             selected[decl.id] = decl
