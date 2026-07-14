@@ -256,12 +256,17 @@ conflicts_with  derived_from  related_to  revision_of
 ```
 
 `supersedes` removes the target from default read results only when the source
-declaration is lifecycle `active` and the target resolves uniquely. A full id
-must match exactly; a bare name resolves only when exactly one declaration has
-that name. Ambiguous, duplicate, dangling, or wrongly prefixed targets have no
-authority effect. This is the shared v0.6 correctness rule used by map, query,
-compliance, list, status authority counts, and vocabulary. It is not the
-proposed CompiledWorkspace or ResolvedView contract.
+declaration is lifecycle `active`, the source identity and target resolve
+uniquely, and the edge is not part of an active `supersedes`/`revision_of`
+cycle. A full id must match exactly; a bare name resolves only when exactly one
+declaration has that name. Ambiguous, duplicate, dangling, wrongly prefixed,
+or cyclic targets have no authority effect. Cycle participants remain visible
+and lint reports `revision_cycle` instead of silently excluding every node.
+
+When multiple valid active declarations supersede one target, report mode does
+not choose a winner: all successors remain visible and lint reports
+`supersedes_fork`; the old target remains superseded. `conflicts_with` keeps
+both declarations visible under CONFLICT.
 `conflicts_with` keeps both declarations visible under CONFLICT.
 
 ## 5. Extensible type system
@@ -483,6 +488,11 @@ Universal diagnostics include:
 | `unknown_type_field` | Strict type schema rejects a field |
 | `missing_evidence` | Active evidence-required memory lacks evidence |
 | `unresolved_symbol` | Subject or relation target is unknown |
+| `ambiguous_relation_target` | A bare or duplicate relation target has multiple source occurrences |
+| `relation_target_kind_mismatch` | A full relation id uses the wrong type prefix; no suffix fallback occurs |
+| `unknown_relation` | A nested `relations` key is not registered |
+| `revision_cycle` | A resolved `supersedes`/`revision_of` edge participates in a cycle |
+| `supersedes_fork` | Multiple active successors supersede one target (report-mode warning) |
 | `duplicate_declaration_id` | Stable id is declared twice |
 | `duplicate_declaration` | Type/subject/scope/claim duplicate another memory |
 | `type_force_mismatch` | Force is outside the type descriptor policy |
@@ -498,6 +508,17 @@ The former `unmarked_supersede_status` warning is not emitted. Append-only
 correction intentionally leaves the old declaration unchanged; currentness is
 derived from an authoritative incoming `supersedes` relation rather than an
 in-place `status: superseded` rewrite.
+
+Compiler/link diagnostic codes are stable; human-readable messages may become
+clearer. `revision_cycle`, ambiguous/wrong-prefix/unknown relation targets, and
+duplicate ids are errors. `supersedes_fork` is a warning in report mode because
+quarantine/strict pollution scope is not yet a public default.
+
+Duplicate ids remain visible as source occurrences in collection surfaces, but
+single-declaration explain resolution fails with an ambiguous result instead
+of selecting the first file occurrence. MCP `status.v1` and `lint.v1` may add
+report-only View/diagnostic summaries; v1 map/query authority and payloads do
+not change.
 
 ## 10. Gated writing and review
 

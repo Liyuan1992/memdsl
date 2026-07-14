@@ -118,7 +118,7 @@ def test_compiled_workspace_builds_required_indexes_and_resolves_references() ->
     wrong_prefix = compiled.resolve_reference("decision:topic.old")
     assert full.status == bare.status == "resolved"
     assert full.target_id == bare.target_id == "fact:topic.old"
-    assert wrong_prefix.status == "not_found"
+    assert wrong_prefix.status == "kind_mismatch"
     assert wrong_prefix.target_id is None
 
 
@@ -153,12 +153,11 @@ fact duplicate.target {
     assert len({
         edge.edge_id for edge in compiled.outgoing["fact:duplicate.item"]
     }) == 2
-    # v0.6 explain compatibility remains indexed-first-occurrence until the
-    # Phase 1 duplicate serving gate is explicitly implemented.
+    # Occurrences remain inspectable internally, but Phase 1 no longer serves
+    # one arbitrary occurrence as the resolved declaration.
     assert compiled.first_occurrence("fact:duplicate.item").claim_text == (
         "First synthetic occurrence.")
-    assert explain(compiled, "fact:duplicate.item").startswith(
-        "fact:duplicate.item\n")
+    assert "ambiguous" in explain(compiled, "fact:duplicate.item")
 
 
 def test_resolved_incoming_and_outgoing_edges_are_consistent() -> None:

@@ -1,4 +1,4 @@
-"""Internal deterministic workspace compilation for Phase 0B.
+"""Internal deterministic workspace compilation for Phase 1.
 
 This module is deliberately not re-exported from :mod:`memdsl`.  It provides
 the indexed, rebuildable representation used by the existing v0.6 read
@@ -16,10 +16,46 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple, Union
 
-from memdsl.model import Declaration, Workspace
+from memdsl.model import Declaration, EXCLUDED_STATUSES, RELATION_FIELDS, Workspace
 
 
-COMPILER_CONTRACT_VERSION = "memdsl.compiler.phase0b.v1"
+COMPILER_CONTRACT_VERSION = "memdsl.compiler.phase1.v1"
+
+
+@dataclass(frozen=True)
+class RelationDescriptor:
+    """Internal structural contract for one built-in relation."""
+
+    name: str
+    acyclic: bool = False
+    authority_effect: str = "none"
+
+
+RELATION_REGISTRY = MappingProxyType({
+    name: RelationDescriptor(
+        name=name,
+        acyclic=name in {"supersedes", "revision_of"},
+        authority_effect="exclude_target" if name == "supersedes" else "none",
+    )
+    for name in sorted(RELATION_FIELDS)
+})
+
+
+@dataclass(frozen=True)
+class CompilationDiagnostic:
+    """One stable-code compiler/link diagnostic.
+
+    Codes are the compatibility contract.  Messages may become clearer over
+    time, but are deterministic for a fixed source workspace.
+    """
+
+    code: str
+    severity: str
+    message: str
+    file: str
+    line: int
+    decl_id: Optional[str] = None
+    related_ids: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -74,6 +110,9 @@ class CompiledWorkspace:
     aliases: DeclarationIndex
     outgoing: EdgeIndex
     incoming: EdgeIndex
+    diagnostics: Tuple[CompilationDiagnostic, ...]
+    revision_cycle_edge_ids: frozenset
+    authoritative_supersedes: Tuple[CompiledEdge, ...]
     _legacy_incoming: EdgeIndex = field(repr=False, compare=False)
     _first_by_id: Mapping[str, Declaration] = field(repr=False, compare=False)
     _first_by_name: Mapping[str, Declaration] = field(repr=False, compare=False)
@@ -91,11 +130,19 @@ class CompiledWorkspace:
         """Resolve exact full ids or unique bare names without suffix fallback."""
         if not isinstance(reference, str) or not reference:
             return ReferenceResolution(str(reference or ""), "not_found")
-        candidates = (
-            self.occurrences_by_id.get(reference, ())
-            if ":" in reference
-            else self.by_name.get(reference, ())
-        )
+        if ":" in reference:
+            candidates = self.occurrences_by_id.get(reference, ())
+            if not candidates:
+                bare = reference.split(":", 1)[1]
+                mismatched = self.by_name.get(bare, ())
+                if mismatched:
+                    return ReferenceResolution(
+                        reference,
+                        "kind_mismatch",
+                        candidate_ids=tuple(item.id for item in mismatched),
+                    )
+        else:
+            candidates = self.by_name.get(reference, ())
         candidate_ids = tuple(item.id for item in candidates)
         if len(candidates) == 1:
             return ReferenceResolution(
@@ -201,11 +248,19 @@ def compile_workspace(
     })
 
     def resolve(reference: str) -> ReferenceResolution:
-        candidates = (
-            frozen_occurrences.get(reference, ())
-            if ":" in reference
-            else frozen_names.get(reference, ())
-        )
+        if ":" in reference:
+            candidates = frozen_occurrences.get(reference, ())
+            if not candidates:
+                bare = reference.split(":", 1)[1]
+                mismatched = frozen_names.get(bare, ())
+                if mismatched:
+                    return ReferenceResolution(
+                        reference,
+                        "kind_mismatch",
+                        candidate_ids=tuple(item.id for item in mismatched),
+                    )
+        else:
+            candidates = frozen_names.get(reference, ())
         candidate_ids = tuple(item.id for item in candidates)
         if len(candidates) == 1:
             return ReferenceResolution(
@@ -270,6 +325,58 @@ def compile_workspace(
                     _append(legacy_incoming, target_id, edge)
                 ordinal += 1
 
+    frozen_outgoing = _freeze_edge_index(outgoing)
+    frozen_incoming = _freeze_edge_index(incoming)
+    all_edges = tuple(
+        edge for edges in frozen_outgoing.values() for edge in edges)
+    unique_source_ids = {
+        declaration_id
+        for declaration_id, items in frozen_occurrences.items()
+        if len(items) == 1
+    }
+    revision_edges = tuple(
+        edge for edge in all_edges
+        if RELATION_REGISTRY[edge.relation].acyclic
+        if edge.status == "resolved"
+        if edge.source_id in unique_source_ids
+    )
+    revision_components = _cyclic_components(revision_edges)
+    revision_cycle_edge_ids = frozenset(
+        edge.edge_id
+        for component in revision_components
+        for edge in revision_edges
+        if edge.source_id in component and edge.target_id in component
+    )
+
+    active_revision_edges = tuple(
+        edge for edge in revision_edges
+        if _is_active_source(edge, resolved_by_id)
+    )
+    active_cycle_components = _cyclic_components(active_revision_edges)
+    authority_cycle_edge_ids = frozenset(
+        edge.edge_id
+        for component in active_cycle_components
+        for edge in active_revision_edges
+        if edge.source_id in component and edge.target_id in component
+    )
+    authoritative_supersedes = tuple(
+        edge for edge in all_edges
+        if edge.relation == "supersedes"
+        if edge.status == "resolved"
+        if edge.source_id in unique_source_ids
+        if _is_active_source(edge, resolved_by_id)
+        if edge.edge_id not in authority_cycle_edge_ids
+    )
+    diagnostics = _compile_diagnostics(
+        declarations=declarations,
+        occurrences_by_id=frozen_occurrences,
+        resolved_by_id=resolved_by_id,
+        edges=all_edges,
+        revision_edges=revision_edges,
+        revision_components=revision_components,
+        authoritative_supersedes=authoritative_supersedes,
+    )
+
     return CompiledWorkspace(
         source_fingerprint=fingerprint,
         declarations=declarations,
@@ -283,14 +390,260 @@ def compile_workspace(
         by_subject=_freeze_declaration_index(by_subject),
         by_scope=_freeze_declaration_index(by_scope),
         aliases=_freeze_declaration_index(aliases),
-        outgoing=_freeze_edge_index(outgoing),
-        incoming=_freeze_edge_index(incoming),
+        outgoing=frozen_outgoing,
+        incoming=frozen_incoming,
+        diagnostics=diagnostics,
+        revision_cycle_edge_ids=revision_cycle_edge_ids,
+        authoritative_supersedes=authoritative_supersedes,
         _legacy_incoming=_freeze_edge_index(
             legacy_incoming, preserve_input_order=True),
         _first_by_id=MappingProxyType(dict(first_by_id)),
         _first_by_name=MappingProxyType(dict(first_by_name)),
         workspace=workspace,
     )
+
+
+def _compile_diagnostics(
+    *,
+    declarations: Tuple[Declaration, ...],
+    occurrences_by_id: DeclarationIndex,
+    resolved_by_id: Mapping[str, Declaration],
+    edges: Tuple[CompiledEdge, ...],
+    revision_edges: Tuple[CompiledEdge, ...],
+    revision_components: Tuple[frozenset, ...],
+    authoritative_supersedes: Tuple[CompiledEdge, ...],
+) -> Tuple[CompilationDiagnostic, ...]:
+    diagnostics = []
+
+    for declaration_id, occurrences in occurrences_by_id.items():
+        if len(occurrences) < 2:
+            continue
+        first = occurrences[0]
+        for duplicate in occurrences[1:]:
+            diagnostics.append(CompilationDiagnostic(
+                "duplicate_declaration_id",
+                "error",
+                f"'{declaration_id}' already declared at {first.file}:{first.line}",
+                duplicate.file,
+                duplicate.line,
+                declaration_id,
+                related_ids=(declaration_id,),
+            ))
+
+    for declaration in declarations:
+        raw_relations = declaration.fields.get("relations")
+        if not isinstance(raw_relations, dict):
+            continue
+        for relation in sorted(set(raw_relations) - set(RELATION_REGISTRY)):
+            diagnostics.append(CompilationDiagnostic(
+                "unknown_relation",
+                "error",
+                f"memory '{declaration.id}' uses unknown relation '{relation}'",
+                declaration.file,
+                declaration.line,
+                declaration.id,
+            ))
+
+    for edge in edges:
+        if edge.status == "resolved":
+            continue
+        if edge.status == "ambiguous":
+            candidates = ", ".join(sorted(set(edge.candidate_ids)))
+            diagnostics.append(CompilationDiagnostic(
+                "ambiguous_relation_target",
+                "error",
+                f"relation '{edge.relation}' target '{edge.target_ref}' is ambiguous"
+                + (f": {candidates}" if candidates else ""),
+                edge.file,
+                edge.line,
+                edge.source_id,
+                related_ids=tuple(sorted(set(edge.candidate_ids))),
+            ))
+        elif edge.status == "kind_mismatch":
+            candidates = ", ".join(sorted(set(edge.candidate_ids)))
+            diagnostics.append(CompilationDiagnostic(
+                "relation_target_kind_mismatch",
+                "error",
+                f"relation '{edge.relation}' target '{edge.target_ref}' has the "
+                f"wrong type prefix; available target(s): {candidates}",
+                edge.file,
+                edge.line,
+                edge.source_id,
+                related_ids=tuple(sorted(set(edge.candidate_ids))),
+            ))
+        else:
+            diagnostics.append(CompilationDiagnostic(
+                "unresolved_symbol",
+                "error",
+                f"relation '{edge.relation}' points to unknown declaration "
+                f"'{edge.target_ref}'",
+                edge.file,
+                edge.line,
+                edge.source_id,
+            ))
+
+    component_by_node = {
+        node: component
+        for component in revision_components
+        for node in component
+    }
+    cycle_paths = {
+        component: _canonical_cycle_path(component, revision_edges)
+        for component in revision_components
+    }
+    for edge in revision_edges:
+        component = component_by_node.get(edge.source_id)
+        if component is None or edge.target_id not in component:
+            continue
+        path = cycle_paths[component]
+        diagnostics.append(CompilationDiagnostic(
+            "revision_cycle",
+            "error",
+            "revision relation cycle detected: " + " -> ".join(path),
+            edge.file,
+            edge.line,
+            edge.source_id,
+            related_ids=tuple(path[:-1]),
+        ))
+
+    successors_by_target: Dict[str, Dict[str, CompiledEdge]] = {}
+    for edge in authoritative_supersedes:
+        if edge.target_id is None:
+            continue
+        successors_by_target.setdefault(edge.target_id, {}).setdefault(
+            edge.source_id, edge)
+    for target_id, successors in sorted(successors_by_target.items()):
+        if len(successors) < 2:
+            continue
+        successor_ids = tuple(sorted(successors))
+        for source_id in successor_ids:
+            edge = successors[source_id]
+            diagnostics.append(CompilationDiagnostic(
+                "supersedes_fork",
+                "warning",
+                f"'{target_id}' is superseded by multiple active declarations: "
+                + ", ".join(successor_ids),
+                edge.file,
+                edge.line,
+                source_id,
+                related_ids=(target_id,) + successor_ids,
+            ))
+
+    return tuple(sorted(diagnostics, key=_diagnostic_sort_key))
+
+
+def _is_active_source(
+    edge: CompiledEdge,
+    resolved_by_id: Mapping[str, Declaration],
+) -> bool:
+    source = resolved_by_id.get(edge.source_id)
+    return bool(
+        source is not None
+        and source.status == "active"
+        and source.status not in EXCLUDED_STATUSES
+    )
+
+
+def _cyclic_components(
+    edges: Tuple[CompiledEdge, ...],
+) -> Tuple[frozenset, ...]:
+    """Return deterministic strongly connected components that contain a cycle."""
+    adjacency: Dict[str, set] = {}
+    reverse: Dict[str, set] = {}
+    nodes = set()
+    self_loops = set()
+    for edge in edges:
+        if edge.target_id is None:
+            continue
+        nodes.update((edge.source_id, edge.target_id))
+        adjacency.setdefault(edge.source_id, set()).add(edge.target_id)
+        reverse.setdefault(edge.target_id, set()).add(edge.source_id)
+        if edge.source_id == edge.target_id:
+            self_loops.add(edge.source_id)
+
+    ordered_adjacency = {
+        node: tuple(sorted(adjacency.get(node, ()))) for node in nodes}
+    ordered_reverse = {
+        node: tuple(sorted(reverse.get(node, ()))) for node in nodes}
+
+    visited = set()
+    finish = []
+    for root in sorted(nodes):
+        if root in visited:
+            continue
+        visited.add(root)
+        stack = [(root, 0)]
+        while stack:
+            node, index = stack[-1]
+            neighbors = ordered_adjacency[node]
+            if index < len(neighbors):
+                neighbor = neighbors[index]
+                stack[-1] = (node, index + 1)
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    stack.append((neighbor, 0))
+                continue
+            finish.append(node)
+            stack.pop()
+
+    assigned = set()
+    components = []
+    for root in reversed(finish):
+        if root in assigned:
+            continue
+        component = set()
+        stack = [root]
+        assigned.add(root)
+        while stack:
+            node = stack.pop()
+            component.add(node)
+            for neighbor in reversed(ordered_reverse[node]):
+                if neighbor not in assigned:
+                    assigned.add(neighbor)
+                    stack.append(neighbor)
+        if len(component) > 1 or any(node in self_loops for node in component):
+            components.append(frozenset(component))
+    return tuple(sorted(components, key=lambda item: tuple(sorted(item))))
+
+
+def _canonical_cycle_path(
+    component: frozenset,
+    edges: Tuple[CompiledEdge, ...],
+) -> Tuple[str, ...]:
+    adjacency: Dict[str, set] = {}
+    for edge in edges:
+        if edge.target_id is None:
+            continue
+        if edge.source_id in component and edge.target_id in component:
+            adjacency.setdefault(edge.source_id, set()).add(edge.target_id)
+    start = min(component)
+    if start in adjacency.get(start, set()):
+        return (start, start)
+
+    ordered = {
+        node: tuple(sorted(adjacency.get(node, ()))) for node in component}
+    path = [start]
+    in_path = {start}
+    stack = [(start, 0)]
+    while stack:
+        node, index = stack[-1]
+        neighbors = ordered[node]
+        if index >= len(neighbors):
+            stack.pop()
+            in_path.remove(path.pop())
+            continue
+        neighbor = neighbors[index]
+        stack[-1] = (node, index + 1)
+        if neighbor == start:
+            return tuple(path + [start])
+        if neighbor in in_path:
+            continue
+        path.append(neighbor)
+        in_path.add(neighbor)
+        stack.append((neighbor, 0))
+    # Strong connectivity guarantees a cycle through start.  This fallback is
+    # defensive and deterministic if an inconsistent edge set reaches here.
+    return tuple(sorted(component)) + (min(component),)
 
 
 def source_state_signature(
@@ -475,9 +828,11 @@ def _freeze_edge_index(
 
 
 def _declaration_sort_key(declaration: Declaration) -> tuple:
+    file_name = str(declaration.file)
     return (
         declaration.id,
-        os.path.normcase(str(declaration.file)),
+        file_name.startswith("<"),
+        os.path.normcase(file_name),
         declaration.line,
         _digest_json(_json_safe(declaration.fields)),
     )
@@ -492,6 +847,17 @@ def _edge_sort_key(edge: CompiledEdge) -> tuple:
         edge.target_id or edge.target_ref,
         edge.ordinal,
         edge.edge_id,
+    )
+
+
+def _diagnostic_sort_key(diagnostic: CompilationDiagnostic) -> tuple:
+    return (
+        os.path.normcase(str(diagnostic.file)),
+        str(diagnostic.file),
+        diagnostic.line,
+        diagnostic.code,
+        diagnostic.decl_id or "",
+        diagnostic.message,
     )
 
 

@@ -25,6 +25,11 @@ surface is built for an agent that reads memory itself:
   pack): a no-match reports which matching memories a filter hid and which
   vocabulary the workspace speaks, so a miss is a retry signal instead of a
   dead end.
+- **Report-only link diagnostics** (`memdsl lint`, MCP `memory_lint` and
+  `memdsl://status`): duplicate ids, ambiguous/wrong-prefix/dangling targets,
+  unknown relations, revision cycles, and supersede forks are explicit. Cycle
+  edges cannot make every participant disappear, forks never select a winner,
+  and default Map/query authority remains v1-compatible.
 - **Raw source as the floor** (`memdsl://file/{file_id}`): the agent can
   always drop down and read the actual declarations, the way a coding agent
   reads code.
@@ -735,6 +740,10 @@ memdsl 的出发点是"让 agent 自己读记忆"胜过"让相似度匹配替 ag
   `excluded_by_filters` 非空意味着"记忆存在，是你的过滤器把它藏起来了"。
   MCP 查询没命中时还会返回 workspace 词表，agent 可以换用记忆库自己的语言
   重新提问。
+- **只报告、不隔离的链接诊断**（`memdsl lint`、MCP `memory_lint` 与
+  `memdsl://status`）：duplicate id、歧义/错误前缀/dangling target、未知 relation、
+  revision cycle 和 supersede fork 都会显式出现。cycle edge 不会让参与节点全部
+  消失，fork 不会暗选 winner，而默认 Map/query authority 仍保持 v1 兼容。
 
 ### 执行前约束检查
 

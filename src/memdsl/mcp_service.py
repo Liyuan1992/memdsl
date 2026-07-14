@@ -55,6 +55,7 @@ from memdsl.policy import (
 from memdsl.review import AuditLogError, ReviewStore, staging_dir_for
 from memdsl.review_reporting import proposal_review_metadata
 from memdsl.schema import SchemaError
+from memdsl.view import diagnostic_summary, resolve_view
 
 SUMMARY_SCOPE = "read:summary"
 SEARCH_SCOPE = "read:search"
@@ -340,6 +341,7 @@ class MemdslMCPService:
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
         ws = compiled.workspace
+        view = resolve_view(compiled)
         current = current_declarations(compiled)
         kinds: dict = {}
         for d in ws.declarations:
@@ -407,6 +409,8 @@ class MemdslMCPService:
             "types": dict(sorted(kinds.items())),
             "registered_types": ws.registry.names(),
             "schema_files": list(ws.registry.schema_files),
+            "view": view.metadata(),
+            "diagnostic_summary": view.diagnostic_summary(),
             "scopes": sorted(self.scopes),
             "resources": list(RESOURCE_URIS),
             "tools": list(TOOL_NAMES),
@@ -550,7 +554,30 @@ class MemdslMCPService:
             compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
-        d = compiled.first_occurrence(ref)
+        resolution = compiled.resolve_reference(ref)
+        if resolution.status == "ambiguous":
+            duplicate_full_id = bool(
+                ":" in ref and len(compiled.occurrences_by_id.get(ref, ())) > 1)
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": "ambiguous",
+                "error": (
+                    "duplicate_declaration_id"
+                    if duplicate_full_id else "ambiguous_reference"),
+                "id": ref,
+                "candidate_ids": sorted(set(resolution.candidate_ids)),
+                "occurrences": len(
+                    compiled.occurrences_by_id.get(ref, ()))
+                    if duplicate_full_id else len(resolution.candidate_ids),
+                "next_actions": [
+                    "Fix duplicate declaration ids in source before explaining "
+                    "this id."
+                    if duplicate_full_id else
+                    "Pass a unique full declaration id (type:name)."
+                ],
+            }
+        d = resolution.declaration
         if d is None:
             return {
                 "ok": False,
@@ -734,7 +761,7 @@ class MemdslMCPService:
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
         ws = compiled.workspace
-        diags = lint(ws)
+        diags = lint(compiled)
         errors = sum(1 for d in diags if d.severity == "error")
         warnings = sum(1 for d in diags if d.severity == "warning")
         return {
@@ -744,6 +771,12 @@ class MemdslMCPService:
             "declarations": len(ws.declarations),
             "errors": errors,
             "warnings": warnings,
+            "diagnostic_summary": {
+                "total": len(diags),
+                "errors": errors,
+                "warnings": warnings,
+                "compiler": diagnostic_summary(compiled.diagnostics),
+            },
             "diagnostics": [
                 {
                     "code": d.code,

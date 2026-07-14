@@ -3,6 +3,11 @@
 Implements the v0.5 schema-driven rule set from the spec:
 
     unresolved_symbol           error    subject/relation target not defined
+    ambiguous_relation_target  error    relation target resolves to many occurrences
+    relation_target_kind_mismatch error full id uses the wrong type prefix
+    unknown_relation           error    nested relation key is not registered
+    revision_cycle             error    supersedes/revision_of cycle
+    supersedes_fork            warning  multiple active successors share a target
     ambiguous_alias             warning  alias resolves to multiple symbols
     duplicate_declaration_id    error    same id declared twice
     duplicate_declaration       warning  same type+subject+scope+claim
@@ -26,7 +31,8 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional
 
-from memdsl.model import Workspace, Declaration
+from memdsl.compiler import WorkspaceInput, ensure_compiled
+from memdsl.model import Declaration
 
 STALE_STATE_DAYS = 180
 MODULE_MAX_DECLARATIONS = 50
@@ -74,22 +80,12 @@ def _code(d: Declaration, capability: str, default: str) -> str:
     return str(d.type_descriptor.diagnostic_codes.get(capability, default))
 
 
-def lint(ws: Workspace, today: Optional[_dt.date] = None) -> List[Diagnostic]:
+def lint(ws: WorkspaceInput, today: Optional[_dt.date] = None) -> List[Diagnostic]:
     today = today or _dt.date.today()
+    compiled = ensure_compiled(ws)
+    ws = compiled.workspace
     diags: List[Diagnostic] = []
     known = ws.known_names() | ws.known_symbols()
-
-    # duplicate ids
-    seen_ids = {}
-    for d in ws.declarations:
-        if d.id in seen_ids:
-            first = seen_ids[d.id]
-            diags.append(Diagnostic(
-                "duplicate_declaration_id", "error",
-                f"'{d.id}' already declared at {first.file}:{first.line}",
-                d.file, d.line, d.id))
-        else:
-            seen_ids[d.id] = d
 
     # duplicate content (same type+subject+scope+claim)
     seen_content = {}
@@ -156,16 +152,6 @@ def lint(ws: Workspace, today: Optional[_dt.date] = None) -> List[Diagnostic]:
                 "unresolved_symbol", "error",
                 f"subject '{subject}' is not a declared symbol",
                 d.file, d.line, d.id))
-
-        # unresolved relation targets
-        for rel, targets in d.relations().items():
-            for target in targets:
-                bare = target.split(":", 1)[-1]
-                if target not in known and bare not in known:
-                    diags.append(Diagnostic(
-                        "unresolved_symbol", "error",
-                        f"relation '{rel}' points to unknown declaration '{target}'",
-                        d.file, d.line, d.id))
 
         # evidence capability (covers defaults and schemas that prefer a
         # capability over listing evidence in required_fields)
@@ -296,7 +282,21 @@ def lint(ws: Workspace, today: Optional[_dt.date] = None) -> List[Diagnostic]:
                 f"(budget {MODULE_MAX_DECLARATIONS}); split it",
                 decls[0].file, decls[0].line))
 
-    return sorted(diags, key=lambda x: (x.file, x.line, x.code))
+    # Compiler/link diagnostics use the same public Diagnostic shape.  Their
+    # deterministic occurrence ordering puts real workspace source before
+    # synthetic proposal markers, so a newly introduced duplicate remains
+    # anchored to the proposal and the repair/review lane stays fail-closed.
+    for diagnostic in compiled.diagnostics:
+        diags.append(Diagnostic(
+            diagnostic.code,
+            diagnostic.severity,
+            diagnostic.message,
+            diagnostic.file,
+            diagnostic.line,
+            diagnostic.decl_id,
+        ))
+
+    return sorted(diags, key=lambda x: (x.file, x.line, x.code, x.message))
 
 
 def has_errors(diags: List[Diagnostic]) -> bool:

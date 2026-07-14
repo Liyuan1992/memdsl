@@ -77,10 +77,23 @@ cannot enter MUST or deterministic compliance. Candidate, retracted, and
 archived declarations also cannot use `supersedes` to hide an active target.
 The v0.6 read functions share one narrow authority resolver: full ids match
 exactly, bare references must be unique, and only an active source relation can
-exclude the resolved target.
+exclude the resolved target. Active `supersedes`/`revision_of` cycle edges do
+not apply exclusion authority; cycle participants remain visible and lint
+reports `revision_cycle`. A report-mode fork never selects one successor.
 
 Serialized packs also expose `search_trace` so a miss carries enough
 information to retry instead of looking like absence.
+
+`lint(workspace)` also reports deterministic compiler/link codes:
+`ambiguous_relation_target`, `relation_target_kind_mismatch`,
+`unknown_relation`, `revision_cycle`, and `supersedes_fork`, while dangling
+targets retain the existing `unresolved_symbol` code. Codes are stable; message
+wording is not a parsing contract. `supersedes_fork` is a report-mode warning;
+the other new structural diagnostics are errors.
+
+The internal `memdsl.compiler.CompiledWorkspace` and
+`memdsl.view.ViewContext`/`ResolvedView` types are implementation modules, not
+package-root exports or stable public Python API in this phase.
 
 ## Navigation path
 
@@ -333,3 +346,8 @@ schema id. The lifecycle-safe supersede resolver is a correctness/security fix
 to that existing authority promise: code that relied on candidate, retracted,
 archived, ambiguous, duplicate, or wrongly prefixed supersedes hiding a target
 was relying on unintended behavior.
+
+Collection reads continue to preserve duplicate source occurrences for
+diagnosis. A single-declaration explain request no longer resolves a duplicate
+full id or ambiguous bare name to the first occurrence; CLI/Python text explain
+reports ambiguity and MCP `memory_explain` returns `status: ambiguous`.

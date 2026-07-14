@@ -122,38 +122,31 @@ def test_non_authoritative_supersedes_global_constraint_must_remain_blocked(
     assert [d.id for d in after.applicable_must] == ["boundary:safety.no_ember"]
 
 
-def test_supersedes_fork_currently_has_no_fork_diagnostic() -> None:
+def test_supersedes_fork_reports_without_selecting_a_winner() -> None:
     ws = workspace_from_fixture("revision_fork.mem")
 
     assert map_ids(ws) == ["fact:topic.left", "fact:topic.right"]
-    assert "supersedes_fork" not in codes(ws)
+    assert "supersedes_fork" in codes(ws)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 1: a fork must be explicit and must never choose a winner",
-)
 def test_supersedes_fork_must_emit_a_diagnostic() -> None:
     diagnostics = lint(workspace_from_fixture("revision_fork.mem"), today=TODAY)
-    assert any("fork" in item.message.lower() for item in diagnostics)
+    assert {item.code for item in diagnostics} == {"supersedes_fork"}
+    assert all(item.severity == "warning" for item in diagnostics)
 
 
-def test_supersedes_cycle_currently_hides_both_nodes_without_cycle_diagnostic(
+def test_supersedes_cycle_keeps_nodes_visible_and_reports_the_cycle(
 ) -> None:
     ws = workspace_from_fixture("revision_cycle.mem")
 
-    assert map_ids(ws) == []
-    assert "supersedes_cycle" not in codes(ws)
+    assert set(map_ids(ws)) == {"fact:topic.alpha", "fact:topic.beta"}
+    assert "revision_cycle" in codes(ws)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 1: cycle edges cannot make every participating node disappear",
-)
 def test_supersedes_cycle_must_fail_loud_without_applying_exclusion() -> None:
     ws = workspace_from_fixture("revision_cycle.mem")
     assert set(map_ids(ws)) == {"fact:topic.alpha", "fact:topic.beta"}
-    assert any("cycle" in item.message.lower() for item in lint(ws, today=TODAY))
+    assert {item.code for item in lint(ws, today=TODAY)} == {"revision_cycle"}
 
 
 def test_map_list_status_and_vocabulary_must_share_current_set(
@@ -180,7 +173,7 @@ def test_ambiguous_bare_reference_has_no_authority_effect() -> None:
     ws = workspace_from_fixture("reference_resolution.mem")
     remaining = set(map_ids(ws))
 
-    assert "ambiguous_relation_target" not in codes(ws)
+    assert "ambiguous_relation_target" in codes(ws)
     assert "fact:shared" in remaining
     assert "decision:shared" in remaining
     assert "fact:bare.successor" in remaining
@@ -212,7 +205,7 @@ fact topic.new {{
     assert [item.declaration.id for item in pack.context] == ["fact:topic.new"]
 
 
-def test_wrong_kind_prefix_passes_lint_but_does_not_link_at_runtime() -> None:
+def test_wrong_kind_prefix_fails_loud_and_does_not_link_at_runtime() -> None:
     ws = workspace_from_fixture("reference_resolution.mem")
     prefix_target = ws.by_id("fact:prefix.target")
     assert prefix_target is not None
@@ -221,26 +214,24 @@ def test_wrong_kind_prefix_passes_lint_but_does_not_link_at_runtime() -> None:
         item for item in lint(ws, today=TODAY)
         if item.decl_id == "fact:prefix.successor"
     ]
-    assert "unresolved_symbol" not in {item.code for item in target_diags}
+    assert {item.code for item in target_diags} == {
+        "relation_target_kind_mismatch"}
     assert "fact:prefix.target" in map_ids(ws)
     explained = service_for_workspace(ws).explain("fact:prefix.target")
     assert explained["declaration"]["referenced_by"] == []
 
 
-def test_unknown_relation_key_is_silently_dropped() -> None:
+def test_unknown_relation_key_is_diagnosed_even_though_normalization_drops_it(
+) -> None:
     ws = workspace_from_fixture("reference_resolution.mem")
     declaration = ws.by_id("fact:typo.source")
     assert declaration is not None
 
     assert declaration.fields["relations"] == {"supercedes": "prefix.target"}
     assert declaration.relations() == {}
-    assert "unknown_relation" not in codes(ws)
+    assert "unknown_relation" in codes(ws)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 1: compiler resolver exists; full reference diagnostics must fail loud",
-)
 def test_reference_resolution_must_fail_loud_consistently() -> None:
     ws = workspace_from_fixture("reference_resolution.mem")
     diagnostics = lint(ws, today=TODAY)
@@ -250,25 +241,25 @@ def test_reference_resolution_must_fail_loud_consistently() -> None:
         item for item in diagnostics if item.decl_id == "fact:prefix.successor"]
     relation_typo = [
         item for item in diagnostics if item.decl_id == "fact:typo.source"]
-    assert ambiguous and wrong_prefix and relation_typo
+    assert {item.code for item in ambiguous} == {"ambiguous_relation_target"}
+    assert {item.code for item in wrong_prefix} == {
+        "relation_target_kind_mismatch"}
+    assert {item.code for item in relation_typo} == {"unknown_relation"}
     assert {"fact:shared", "decision:shared"} <= set(map_ids(ws))
 
 
-def test_duplicate_full_id_is_lint_error_but_read_paths_serve_both_and_first(
+def test_duplicate_full_id_is_visible_in_collections_but_not_single_resolution(
 ) -> None:
     ws = workspace_from_fixture("duplicate_id.mem")
     payload = service_for_workspace(ws).explain("fact:duplicate.item")
 
     assert "duplicate_declaration_id" in codes(ws)
     assert map_ids(ws) == ["fact:duplicate.item", "fact:duplicate.item"]
-    assert payload["status"] == "ok"
-    assert payload["declaration"]["claim"] == "First synthetic occurrence."
+    assert payload["status"] == "ambiguous"
+    assert payload["error"] == "duplicate_declaration_id"
+    assert payload["occurrences"] == 2
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 1: occurrences are preserved; duplicate identity must gate serving",
-)
 def test_duplicate_full_id_must_not_be_served_as_a_single_resolved_declaration(
 ) -> None:
     ws = workspace_from_fixture("duplicate_id.mem")

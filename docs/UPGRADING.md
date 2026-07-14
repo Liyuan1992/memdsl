@@ -70,6 +70,30 @@ compliance results will observe a deliberate behavior correction. There is no
 source migration and no legacy flag: make the reviewed successor active and
 use an exact full id or unique bare reference.
 
+### Compiled link diagnostics and report-only View
+
+The Phase 1 source line adds report-only compiler/link diagnostics without
+changing default Map v1, EvidencePack v1, list, or compliance authority:
+
+- `supersedes`/`revision_of` cycles emit `revision_cycle` errors. Active cycle
+  edges do not exclude their targets, so the participating declarations remain
+  visible instead of all disappearing.
+- Multiple valid active successors emit `supersedes_fork` warnings. No winner
+  is selected; both successors remain visible.
+- Ambiguous targets emit `ambiguous_relation_target`; wrong full-id prefixes
+  emit `relation_target_kind_mismatch`; unknown nested relation keys emit
+  `unknown_relation`. Dangling targets retain `unresolved_symbol`.
+- Duplicate full ids still appear as separate source occurrences in collection
+  surfaces, but single explain resolution returns ambiguity rather than the
+  first occurrence.
+- MCP status/lint v1 payloads add optional report-only View and diagnostic
+  summaries. Clients should ignore unknown additive fields.
+
+These diagnostics can make an already structurally broken workspace fail
+`memdsl lint` where the old linter was silent. Fix the source relation or id;
+there is no `.mem` syntax migration. Internal compiler/View classes are not yet
+stable package-root Python API.
+
 ### MCP propose payload
 
 `memory_propose` now returns `memdsl.mcp.propose.v2`. Successful payloads

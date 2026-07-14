@@ -1,10 +1,10 @@
 """Minimal lifecycle-safe authority resolution for v0.6 read surfaces.
 
-Phase 0B delegates lookup to the internal CompiledWorkspace resolver while
-preserving the narrow Phase 0A invariant: a ``supersedes`` relation can affect
-serving when its source is active and its target resolves uniquely and exactly.
-Revision families, fork/cycle diagnostics, visibility, and quarantine remain
-outside this compatibility helper.
+Phase 1 delegates lookup and structural safety to the internal
+CompiledWorkspace.  A ``supersedes`` relation can affect serving only when its
+source is active and uniquely identified, its target resolves uniquely and
+exactly, and the edge does not participate in an active revision cycle.
+Forks remain report-only and never select a winner.
 """
 
 from __future__ import annotations
@@ -33,17 +33,11 @@ def resolve_unique_reference(
 def authoritative_superseded_ids(workspace: WorkspaceInput) -> Set[str]:
     """Return full ids excluded by authoritative ``supersedes`` relations."""
     compiled = ensure_compiled(workspace)
-    superseded: Set[str] = set()
-    for source in compiled.declarations:
-        if source.status in EXCLUDED_STATUSES:
-            continue
-        if source.status != "active":
-            continue
-        for reference in source.relations().get("supersedes", []):
-            target = resolve_unique_reference(compiled, reference)
-            if target is not None:
-                superseded.add(target.id)
-    return superseded
+    return {
+        edge.target_id
+        for edge in compiled.authoritative_supersedes
+        if edge.target_id is not None
+    }
 
 
 def current_declarations(workspace: WorkspaceInput) -> List[Declaration]:

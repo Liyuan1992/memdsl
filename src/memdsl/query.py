@@ -529,7 +529,10 @@ def _clip(text: str, max_chars: int) -> str:
 def explain(ws: WorkspaceInput, decl_id: str) -> str:
     """Render one declaration with its relations and evidence."""
     compiled = ensure_compiled(ws)
-    d = compiled.first_occurrence(decl_id)
+    resolution = compiled.resolve_reference(decl_id)
+    if resolution.status == "ambiguous":
+        return f"declaration '{decl_id}' is ambiguous and cannot be resolved safely"
+    d = resolution.declaration
     if d is None:
         return f"declaration '{decl_id}' not found"
     lines = [
