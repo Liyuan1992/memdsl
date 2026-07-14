@@ -31,6 +31,7 @@ WORKSPACE_SCHEMA_VERSIONS = frozenset({
     WORKSPACE_SCHEMA_VERSION_V2,
 })
 LINKING_VISIBILITIES = frozenset({"report", "strict"})
+ENFORCEMENT_MODES = frozenset({"report", "quarantine", "strict"})
 
 
 class SchemaError(ValueError):
@@ -162,6 +163,7 @@ class TypeRegistry:
         self.manifest_files: List[str] = []
         self.workspace_schema_version = WORKSPACE_SCHEMA_VERSION
         self.linking_visibility = "legacy"
+        self.enforcement_mode = "legacy"
 
     def register(self, descriptor: TypeDescriptor, *, replace: bool = False) -> None:
         name = str(descriptor.name or "").strip()
@@ -378,7 +380,7 @@ def registry_for_paths(paths: Iterable[str]) -> TypeRegistry:
         manifest = os.path.join(root, WORKSPACE_MANIFEST)
         if os.path.isfile(manifest) and manifest not in manifests:
             manifests.append(manifest)
-    manifest_contract: Optional[Tuple[str, str]] = None
+    manifest_contract: Optional[Tuple[str, str, str]] = None
     for manifest in sorted(manifests):
         try:
             with open(manifest, "r", encoding="utf-8") as handle:
@@ -395,14 +397,18 @@ def registry_for_paths(paths: Iterable[str]) -> TypeRegistry:
                 f"{manifest}: schema_version must be one of "
                 f"{sorted(WORKSPACE_SCHEMA_VERSIONS)!r}")
         if manifest_version == WORKSPACE_SCHEMA_VERSION:
-            if "linking" in payload:
+            forbidden = sorted(set(payload) & {"linking", "enforcement"})
+            if forbidden:
                 raise SchemaError(
-                    f"{manifest}: memdsl.workspace.v1 cannot declare 'linking'; "
-                    "use memdsl.workspace.v2 for visibility semantics")
+                    f"{manifest}: memdsl.workspace.v1 cannot declare "
+                    f"{', '.join(repr(item) for item in forbidden)}; use "
+                    "memdsl.workspace.v2 for visibility/enforcement semantics")
             linking_visibility = "legacy"
+            enforcement_mode = "legacy"
         else:
             unknown = sorted(
-                set(payload) - {"schema_version", "schemas", "linking"})
+                set(payload) - {
+                    "schema_version", "schemas", "linking", "enforcement"})
             if unknown:
                 raise SchemaError(
                     f"{manifest}: memdsl.workspace.v2 has unknown field(s): "
@@ -420,14 +426,30 @@ def registry_for_paths(paths: Iterable[str]) -> TypeRegistry:
             if linking_visibility not in LINKING_VISIBILITIES:
                 raise SchemaError(
                     f"{manifest}: linking.visibility must be 'report' or 'strict'")
-        contract = (manifest_version, linking_visibility)
+            enforcement = payload.get("enforcement", {"mode": "report"})
+            if not isinstance(enforcement, dict):
+                raise SchemaError(
+                    f"{manifest}: enforcement must be an object")
+            unknown_enforcement = sorted(set(enforcement) - {"mode"})
+            if unknown_enforcement:
+                raise SchemaError(
+                    f"{manifest}: enforcement has unknown field(s): "
+                    f"{', '.join(unknown_enforcement)}")
+            enforcement_mode = enforcement.get("mode", "report")
+            if enforcement_mode not in ENFORCEMENT_MODES:
+                raise SchemaError(
+                    f"{manifest}: enforcement.mode must be 'report', "
+                    "'quarantine', or 'strict'")
+        contract = (manifest_version, linking_visibility, enforcement_mode)
         if manifest_contract is not None and manifest_contract != contract:
             raise SchemaError(
-                f"{manifest}: workspace manifests disagree on schema/linking "
+                f"{manifest}: workspace manifests disagree on schema/linking/"
+                "enforcement "
                 f"contract: {manifest_contract!r} vs {contract!r}")
         manifest_contract = contract
         registry.workspace_schema_version = manifest_version
         registry.linking_visibility = linking_visibility
+        registry.enforcement_mode = enforcement_mode
         registry.manifest_files.append(os.path.abspath(manifest))
         schemas = _strings(payload.get("schemas", []), f"{manifest}.schemas")
         base = os.path.dirname(manifest)

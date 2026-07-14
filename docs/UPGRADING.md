@@ -1,6 +1,11 @@
-# Upgrading to memdsl 0.6
+# Upgrading from the memdsl 0.6 baseline
 
-Release date: 2026-07-14
+Published baseline: memdsl 0.6.0, 2026-07-14.
+
+The Phase 0-5 sections below also describe staged source-line behavior in this
+repository. They do not freeze the next release version or promise that every
+staged surface will ship unchanged; the release-candidate audit owns that
+decision.
 
 ## Python compatibility
 
@@ -91,8 +96,8 @@ changing default Map v1, EvidencePack v1, list, or compliance authority:
 
 These diagnostics can make an already structurally broken workspace fail
 `memdsl lint` where the old linter was silent. Fix the source relation or id;
-there is no `.mem` syntax migration. Internal compiler/View classes are not yet
-stable package-root Python API.
+there is no `.mem` syntax migration. Phase 1 kept compiler/View classes
+internal; Phase 5 later promotes only the resolved read types documented below.
 
 ### Bounded Catalog navigation (Phase 2 source line)
 
@@ -189,9 +194,10 @@ mode makes it an error and the file's uses do not grant strict imports. V1
 keeps the historical last-module-wins behavior.
 
 Strict mode removes unimported relation edges and subject/dialect routing
-effects. It does not yet quarantine the entire declaration or family; that
-enforcement envelope remains Phase 5. Map/query/list/explain/check/compliance
-v1, Catalog/Trace schemas and budgets, and review/audit behavior are unchanged.
+effects. Declaration/family quarantine is a separate Phase 5 opt-in; strict
+linking alone does not enable it. Map/query/list/explain/check/compliance v1,
+Catalog/Trace schemas and budgets, and review/audit behavior are unchanged
+while enforcement remains `report`.
 
 Workspaces may add a schema type with capability `dialect_mapping`. See the
 fictional `examples/dialect/` workspace. Only active, unrestricted, valid,
@@ -204,6 +210,88 @@ structured template, not a write. Add trusted evidence and submit it through
 the existing proposal/review/approval path. Pending mappings remain invisible;
 approval only activates routing after the declaration is appended to Source
 with the correct module/use context and the workspace recompiles.
+
+### Opt-in quarantine enforcement and ResolvedView (Phase 5 source line)
+
+Phase 5 is report-first and does not change existing workspaces. No manifest,
+`memdsl.workspace.v1`, and workspace-v2 manifests with omitted or explicit
+`enforcement.mode=report` continue to use the legacy/v1 read contracts.
+
+After repairing report diagnostics and updating clients for the v2 envelopes,
+an owner may opt in:
+
+```json
+{
+  "schema_version": "memdsl.workspace.v2",
+  "schemas": [],
+  "linking": {"visibility": "report"},
+  "enforcement": {"mode": "quarantine"}
+}
+```
+
+`enforcement.mode` is `report`, `quarantine`, or `strict`; it is independent of
+`linking.visibility`. A v1 manifest that declares `enforcement` fails closed,
+as do unknown enforcement fields and modes. Do not add the field to v1 in
+place.
+
+The public Python additions are `ViewContext`, `ResolvedView`,
+`resolve_view()`, `RESOLVED_VIEW_SCHEMA`, `ENFORCEMENT_TABLE`,
+`build_resolved_evidence_pack()` with `RESOLVED_EVIDENCE_PACK_SCHEMA`,
+`build_resolved_query/list/explain/check()`, `ResolvedCursorError`, and the
+v2 Catalog/Trace schema constants. `CompiledWorkspace` remains internal.
+
+Enforced reads classify Source as authoritative, provisional, quarantined, or
+excluded and use new schemas:
+
+- `memdsl.query.v2`, `memdsl.list.v2`, `memdsl.explain.v2`, and
+  `memdsl.check.v2`;
+- `memdsl.catalog.v2` and `memdsl.trace.v2`;
+- corresponding `memdsl.mcp.*.v2` payloads from the existing 11 MCP tools.
+
+Query distinguishes `ok`, `no_match`, `provisional_only`, `quarantined`,
+`unauthorized`, `compiler_error`, and `budget_limited`. Exact explain/Trace
+also expose quarantined/excluded/unauthorized states. List cursors remain
+opaque and distinguish `invalid_cursor`, `cursor_mismatch`, and
+`cursor_stale`. Check returns `NEEDS_REVIEW` whenever potentially applicable
+authority is unreadable, quarantined, or blocked by compiler identity errors;
+it never treats an incomplete rule set as ALLOW.
+
+Identity-critical duplicate full ids block the enforced workspace. Cycle and
+fork diagnostics quarantine explicit revision families according to mode.
+Use/multiple-module failures quarantine a source file. Relation, subject,
+dialect, type, guard, access, and date errors are declaration-local where
+possible. Health warnings such as ordinary staleness remain report-only.
+Quarantined or unauthorized supersede edges have no authority, so they cannot
+hide a readable target.
+
+Map v1 cannot represent these authority lanes. In an enforced workspace,
+CLI/MCP Map returns `status: unsupported_view` and directs callers to Catalog,
+query, list, explain, or Trace. This is not a Map v1 schema change for legacy or
+report clients.
+
+CLI exit behavior under explicit enforcement is intentional:
+
+- `map` returns 2 for `unsupported_view`;
+- `query`, `trace`, and `explain` return 1 for a non-success read status;
+- `catalog` returns 1 for cursor errors and 2 for invalid requests;
+- `check` remains 0/1/2 for ALLOW/BLOCK/NEEDS_REVIEW.
+
+Phase 5 read identity is host-attested. Only the in-process
+`MemdslMCPService` constructor can inject `principal`, `principal_trusted`, and
+`principal_roles`; MCP callers cannot self-report identity in tool arguments.
+An absent/untrusted principal never widens access. Filtering precedes counts,
+vocabulary, diagnostics, graph traversal, and raw-file resources. The core
+still does not provide an identity provider; hosts must authenticate and map
+roles.
+
+The source-edit, lint, proposal, review, and audit repair lanes remain open.
+Pending proposals are still absent from durable reads, and approval affects a
+View only after Source changes and recompilation. Dialect candidates remain
+non-routing until the existing evidence/review/approval requirements are met.
+
+Rollback is changing `enforcement.mode` to `report` or removing the optional
+field. Source declarations, review stores, and append-only audit history do not
+need reverse migration. Do not delete quarantined Source as a rollback step.
 
 ### MCP propose payload
 

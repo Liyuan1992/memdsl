@@ -24,6 +24,25 @@ def test_v06_public_contract_exports():
     assert callable(memdsl.trace_memory)
     assert memdsl.TraceAnchorError is not None
     assert memdsl.TraceCursorError is not None
+    # Phase 5 opt-in enforcement uses new schemas and a public ResolvedView.
+    assert memdsl.RESOLVED_VIEW_SCHEMA == "memdsl.resolved_view.v1"
+    assert memdsl.RESOLVED_EVIDENCE_PACK_SCHEMA == "memdsl.evidence_pack.v2"
+    assert memdsl.CATALOG_SCHEMA_V2 == "memdsl.catalog.v2"
+    assert memdsl.TRACE_SCHEMA_V2 == "memdsl.trace.v2"
+    assert memdsl.QUERY_SCHEMA == "memdsl.query.v2"
+    assert memdsl.LIST_SCHEMA == "memdsl.list.v2"
+    assert memdsl.EXPLAIN_SCHEMA == "memdsl.explain.v2"
+    assert memdsl.CHECK_SCHEMA == "memdsl.check.v2"
+    assert memdsl.ViewContext is not None
+    assert memdsl.ResolvedView is not None
+    assert memdsl.ENFORCEMENT_TABLE["duplicate_declaration_id"].strict == (
+        "workspace")
+    assert callable(memdsl.resolve_view)
+    assert callable(memdsl.build_resolved_evidence_pack)
+    assert callable(memdsl.build_resolved_query)
+    assert callable(memdsl.build_resolved_list)
+    assert callable(memdsl.build_resolved_explain)
+    assert callable(memdsl.build_resolved_check)
     # 0.6 governed automation and replayable review surfaces
     assert memdsl.POLICY_VERSION == "memdsl.policy.v1"
     assert memdsl.AUTO_APPROVABLE_CAPABILITY == "auto_approvable"

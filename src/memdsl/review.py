@@ -232,6 +232,10 @@ class ReviewStore:
             declarations=list(ws.declarations),
             files=list(ws.files),
             registry=ws.registry,
+            documents=list(ws.documents),
+            schema_version=ws.schema_version,
+            linking_visibility=ws.linking_visibility,
+            enforcement_mode=ws.enforcement_mode,
         )
         merged.add_document(doc)
         decl = merged.declarations[-1]

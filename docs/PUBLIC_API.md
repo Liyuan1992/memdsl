@@ -1,6 +1,10 @@
-# memdsl 0.6 Public Python API
+# memdsl Public Python API
 
-Release date: 2026-07-14
+Published baseline: memdsl 0.6.0, 2026-07-14.
+
+This document also records the staged Phase 0-5 source-line contracts in this
+repository. Their release version and public release scope are not frozen by
+Phase 5; the later entry-gate/release audit owns that decision.
 
 The dependency-free core API supports Python 3.9+. The optional
 `memdsl[mcp]` extra and `memdsl-mcp` server require Python 3.10+ because
@@ -13,8 +17,16 @@ Import stable entry points from the package root:
 from memdsl import (
     AUTO_APPROVABLE_CAPABILITY,
     CATALOG_SCHEMA,
+    CATALOG_SCHEMA_V2,
+    CHECK_SCHEMA,
+    ENFORCEMENT_TABLE,
     EVIDENCE_PACK_SCHEMA,
+    EXPLAIN_SCHEMA,
+    LIST_SCHEMA,
     POLICY_VERSION,
+    QUERY_SCHEMA,
+    RESOLVED_EVIDENCE_PACK_SCHEMA,
+    RESOLVED_VIEW_SCHEMA,
     AuditLogError,
     CatalogCursorError,
     CompliancePack,
@@ -28,17 +40,26 @@ from memdsl import (
     ProposalContext,
     ReviewPolicy,
     ReviewStore,
+    ResolvedCursorError,
+    ResolvedView,
     RoutingAssessment,
     RoutingDecision,
     SchemaError,
     TypeDescriptor,
     TypeRegistry,
     TRACE_SCHEMA,
+    TRACE_SCHEMA_V2,
     TraceAnchorError,
     TraceCursorError,
     ValidationResult,
+    ViewContext,
     Workspace,
     build_evidence_pack,
+    build_resolved_check,
+    build_resolved_evidence_pack,
+    build_resolved_explain,
+    build_resolved_list,
+    build_resolved_query,
     build_memory_catalog,
     build_memory_map,
     check_compliance,
@@ -52,6 +73,7 @@ from memdsl import (
     render_memory_map_text,
     review_digest,
     review_stats,
+    resolve_view,
     staging_dir_for,
     trace_memory,
     verify_workspace_file_quote,
@@ -108,11 +130,12 @@ collisions, multiple matching symbols, wildcards, and missing targets fail
 loud without an implicit precedence rule.
 
 Report mode preserves global relation/subject/dialect linking and adds
-diagnostics. Strict mode removes unimported relation edges and subject/dialect
-routing effects, but does not yet implement Phase 5 declaration quarantine.
-`Workspace.schema_version`, `Workspace.linking_visibility`, and MCP status
-additive fields expose the selected source contract; the internal
-`CompiledWorkspace` remains non-public.
+diagnostics. Strict linking removes unimported relation edges and
+subject/dialect routing effects. Quarantine is a separate Phase 5 opt-in under
+`enforcement.mode`; strict linking does not imply strict enforcement.
+`Workspace.schema_version`, `Workspace.linking_visibility`,
+`Workspace.enforcement_mode`, and MCP status fields expose the selected source
+contract. `CompiledWorkspace` remains non-public.
 
 Workspace-owned dialect types opt in with the generic `dialect_mapping`
 capability. Only active, unrestricted, valid, unambiguous positive mappings to
@@ -137,9 +160,82 @@ visibility diagnostics are warnings in v2 report mode and errors in strict
 mode where applicable. Ambiguous dialect mappings are warnings but never route;
 invalid or unsupported-polarity mappings are errors.
 
-The internal `memdsl.compiler.CompiledWorkspace` and
-`memdsl.view.ViewContext`/`ResolvedView` types are implementation modules, not
-package-root exports or stable public Python API in this phase.
+Phase 5 promotes `ViewContext`, `ResolvedView`, `resolve_view()`,
+`RESOLVED_VIEW_SCHEMA`, and the immutable `ENFORCEMENT_TABLE` to package-root
+public API. `CompiledWorkspace` remains an implementation type; callers may
+pass `Workspace` directly to `resolve_view()`.
+
+### Opt-in resolved read path
+
+Workspace v2 may add an independent read-enforcement mode:
+
+```json
+{
+  "schema_version": "memdsl.workspace.v2",
+  "schemas": [],
+  "linking": {"visibility": "report"},
+  "enforcement": {"mode": "quarantine"}
+}
+```
+
+Omitting `enforcement`, or selecting `report`, keeps the v1 read surfaces and
+authority behavior. `quarantine` and `strict` are explicit opt-ins; a v1
+manifest that declares `enforcement` fails closed.
+
+```python
+workspace = Workspace.load(["memory"])
+view = resolve_view(workspace)
+
+assert view.context.enforcement_mode == "quarantine"
+assert view.envelope()["schema_version"] == RESOLVED_VIEW_SCHEMA
+
+query = build_resolved_query(view, "project release rules")
+listed = build_resolved_list(view, limit=20, max_bytes=8192)
+explained = build_resolved_explain(view, "decision:release.window")
+checked = build_resolved_check(
+    view,
+    "publish the package",
+    "upload the candidate artifacts",
+)
+
+assert query["schema_version"] == QUERY_SCHEMA
+assert listed["schema_version"] == LIST_SCHEMA
+assert explained["schema_version"] == EXPLAIN_SCHEMA
+assert checked["schema_version"] == CHECK_SCHEMA
+```
+
+The ResolvedView lanes are:
+
+- `authoritative`: active, readable, structurally safe declarations;
+- `provisional`: readable non-active declarations with no authority;
+- `quarantined`: readable Source that cannot safely serve because of a local,
+  family, file, or workspace diagnostic;
+- `excluded`: expired or superseded declarations and other explicit
+  non-serving states.
+
+The v2 query status vocabulary distinguishes `ok`, `no_match`,
+`provisional_only`, `quarantined`, `unauthorized`, `compiler_error`, and
+`budget_limited`. List pagination additionally distinguishes `invalid_cursor`,
+`cursor_mismatch`, and `cursor_stale`; explain/Trace can return explicit
+`quarantined`, `excluded`, or `unauthorized` results. Clients must inspect
+`status` and `completeness` rather than treating every empty item array as
+absence.
+
+`build_resolved_evidence_pack()` is the low-level
+`RESOLVED_EVIDENCE_PACK_SCHEMA = "memdsl.evidence_pack.v2"` projection.
+For service code, prefer `build_resolved_query()` because it supplies the
+outer status/completeness/budget envelope. `build_resolved_check()` returns
+`needs_review` whenever a potentially applicable constraint is unreadable,
+quarantined, or hidden by a workspace-blocking compiler error; it never turns
+an incomplete authority set into `allow`.
+
+`ENFORCEMENT_TABLE` freezes diagnostic scope independently from severity.
+Duplicate full identity is workspace-blocking. Revision cycles quarantine the
+explicit family. A fork quarantines successors in `quarantine` mode and the
+target plus successors in `strict` mode. Use/multiple-module failures
+quarantine the source file. Relation, subject, dialect, type, guard, access,
+and date errors are declaration-local where possible. Ordinary health
+warnings remain report-only.
 
 ## Navigation path
 
@@ -194,9 +290,10 @@ duplicated in one payload.
 Catalog cursors are opaque. Reuse them only with the same filters, order, and
 representation. `CatalogCursorError.code` is `invalid_cursor`,
 `cursor_mismatch`, or `cursor_stale`; stale means the source fingerprint or
-report-only view id changed and pagination must restart. `CompiledWorkspace`,
-`ViewContext`, and `ResolvedView` remain internal even though Catalog payloads
-carry their stable report metadata.
+view id changed and pagination must restart. Passing a report View preserves
+`memdsl.catalog.v1`; passing an enforced ResolvedView returns
+`memdsl.catalog.v2` (`CATALOG_SCHEMA_V2`) with quarantine-aware counts and
+metadata. `CompiledWorkspace` remains internal.
 
 The map is a navigation projection. It includes the shared current service set
 after lifecycle-safe supersede exclusion and makes lifecycle status explicit;
@@ -216,7 +313,15 @@ UTF-8 JSON bytes. `TraceCursorError.code` is `invalid_cursor`,
 missing, ambiguous, unauthorized, and non-serviceable anchors. Trace omits
 declarations with non-empty access policy in Phase 3 and never represents graph
 connectivity as proof. `CompiledWorkspace`, `ViewContext`, and `ResolvedView`
-remain internal rather than new package-root types.
+are not serialized graph nodes. Passing an enforced ResolvedView selects
+`memdsl.trace.v2` (`TRACE_SCHEMA_V2`) and applies the same authorization and
+quarantine gate before traversal.
+
+Map remains a v1 compatibility projection. It cannot express the Phase 5
+authority lanes, so CLI/MCP Map returns `status: unsupported_view` for an
+enforced workspace instead of silently projecting quarantined content as
+ordinary memory. Use Catalog, query, list, explain, or Trace for enforced
+reads.
 
 ## Governed write path
 
@@ -300,9 +405,10 @@ result = store.submit(
 The paths form is preferred because automatic approval must be able to reload
 current source and schema state.
 
-## In-process MCP host attestation
+## In-process MCP host attestation and read principal
 
-`MemdslMCPService` exposes two host-only injection points:
+`MemdslMCPService` exposes two write-attestation callbacks plus host-owned
+Phase 5 read-principal inputs:
 
 ```python
 from typing import Callable, Mapping, Optional, Sequence
@@ -352,6 +458,9 @@ service = MemdslMCPService(
     client_name="mcp:fictional-collector",
     context_factory=context_factory,
     evidence_verifier=evidence_verifier,
+    principal="fictional-user-42",
+    principal_trusted=True,
+    principal_roles=["developer"],
 )
 ```
 
@@ -386,6 +495,16 @@ The MCP `memory_propose` tool does not accept client identity, scopes,
 `verified`, verifier ids, or any other attestation field. Tool callers cannot
 select these injection points or promote proposal content into trusted
 context; only the process that constructs `MemdslMCPService` can do so.
+
+The same host-only boundary applies to Phase 5 read authorization.
+`principal`, `principal_trusted`, and `principal_roles` are constructor inputs,
+not MCP tool arguments. In an enforced workspace, an untrusted or absent
+principal cannot widen access. Filtering happens before counts, vocabulary,
+diagnostics, graph traversal, and raw-file projection. A `.mem` file containing
+any unreadable declaration is not served through `memdsl://file/{file_id}`;
+the response does not expose the hidden id, path, or count. memdsl supplies
+this deterministic policy gate but not an identity provider: the embedding
+host is responsible for authenticating the principal and mapping roles.
 
 ## Policy helpers
 
@@ -468,3 +587,11 @@ Phase 4 does not change the Map, Catalog, EvidencePack, Trace, list, explain,
 check, compliance, proposal, or audit schema ids. Workspace v2 is an explicit
 new Source contract; v1/no-manifest workspaces remain in legacy mode. Strict
 visibility is never inferred from the presence of `use` statements alone.
+
+Phase 5 likewise leaves legacy, v1, and workspace-v2 report clients on their
+existing schemas, authority, counts, and exit behavior. Only an explicit
+workspace-v2 `enforcement.mode=quarantine|strict` selects ResolvedView and the
+new query/list/explain/check/Catalog/Trace v2 schemas. These v2 meanings are
+not retrofitted into v1 fields. Rollback is changing enforcement to `report`;
+Source, compiler diagnostics, proposals, review history, and audit history do
+not need to be rewritten.

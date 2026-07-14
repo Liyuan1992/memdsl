@@ -91,6 +91,23 @@ linking. `memdsl.workspace.v2` is an explicit visibility opt-in and requires:
 closed. This prevents an older runtime from silently ignoring visibility
 rules.
 
+Workspace v2 MAY additionally opt in to Phase 5 read enforcement:
+
+```json
+{
+  "schema_version": "memdsl.workspace.v2",
+  "schemas": [],
+  "linking": {"visibility": "report"},
+  "enforcement": {"mode": "quarantine"}
+}
+```
+
+`enforcement.mode` is `report | quarantine | strict`. It is independent of
+`linking.visibility`; omitting it is exactly `report`. A v1 manifest that
+declares `enforcement`, an unknown enforcement field, or an unknown mode fails
+closed. Quarantine/strict behavior therefore never appears merely because a
+workspace contains `use` or selects strict linking.
+
 Schema parse errors, missing files, incompatible duplicate type names, and
 invalid runtime roles fail closed before memory files are served.
 
@@ -119,8 +136,9 @@ mapping targets. Scope strings remain domain-defined opaque applicability
 tokens. In legacy v1, use is retained but global linking is unchanged. In v2
 report mode, a globally resolvable but unimported reference remains linked and
 emits `visibility_violation`. In v2 strict mode it emits an error and does not
-enter compiled relation, subject-alias, or dialect routing. Strict linking does
-not yet imply the Phase 5 declaration/family quarantine envelope.
+enter compiled relation, subject-alias, or dialect routing. Declaration/family
+quarantine occurs only when workspace v2 also explicitly selects
+`enforcement.mode=quarantine|strict`.
 
 Workspace v2 permits at most one `module` statement per source file. Report
 mode emits a migration warning while preserving the legacy last-module
@@ -581,6 +599,64 @@ Phase 5 owns enforcement and permission-aware quarantine metadata. Trace
 connectivity records what Source declares; it is not proof of a natural-
 language conclusion and is never a replacement for evidence or explain.
 
+### 7.5 ResolvedView and opt-in quarantine enforcement
+
+Phase 5 makes `ViewContext`, `ResolvedView`, and `resolve_view()` public. The
+stable View schema is `memdsl.resolved_view.v1`; every readable declaration is
+classified as exactly one of:
+
+| Lane | Meaning |
+| --- | --- |
+| `authoritative` | Active and structurally serviceable in this View |
+| `provisional` | Readable lead without active authority |
+| `quarantined` | Readable Source exists, but local/family structure is unsafe to serve |
+| `excluded` | Lifecycle, supersedes, expiry, access, or another deterministic rule removes it |
+
+Unauthorized declarations are internally excluded, but their ids, paths,
+subjects, vocabulary, diagnostic details, and counts are not included in
+untrusted response aggregates.
+
+The stable diagnostic enforcement table applies only in opt-in quarantine or
+strict mode:
+
+| Diagnostic class | Quarantine mode | Strict mode |
+| --- | --- | --- |
+| duplicate full id | block workspace View | block workspace View |
+| revision cycle | quarantine explicit cycle family | quarantine explicit cycle family |
+| supersedes fork | quarantine successors; restore old target | quarantine target + successors |
+| use collision/missing/wildcard, multiple module statements | quarantine source file | quarantine source file |
+| dangling/ambiguous/wrong-prefix/unknown relation | quarantine source declaration | quarantine source declaration |
+| invalid/ambiguous dialect, type, guard, access, date | quarantine source declaration | quarantine source declaration |
+| stale/size/duplicate-content and other health warnings | report | report |
+
+Unknown error diagnostics fall back to declaration scope when they identify a
+declaration, otherwise source-file scope. Unknown warnings remain report-only.
+Quarantined or unauthorized successor edges have no supersedes authority in
+the View. `valid_until < ViewContext.as_of` is excluded only in opt-in enforced
+views; legacy/report behavior is unchanged.
+
+The low-level resolved pack schema is `memdsl.evidence_pack.v2`. The service
+read schemas are `memdsl.query.v2`, `memdsl.list.v2`,
+`memdsl.explain.v2`, `memdsl.check.v2`, `memdsl.catalog.v2`, and
+`memdsl.trace.v2` (with corresponding `memdsl.mcp.*.v2` schemas). Existing MCP
+tool names are reused, but they return v2 only for explicit enforced
+workspaces. Legacy, v1, and workspace-v2 report clients continue to receive v1.
+Map v1 returns `unsupported_view` under enforcement because it cannot express
+quarantine authority safely.
+
+Query v2 distinguishes `ok`, `no_match`, `provisional_only`, `quarantined`,
+`unauthorized`, `compiler_error`, and `budget_limited`. Explain/Trace add exact
+`excluded`/anchor status; paged reads preserve `invalid_cursor`,
+`cursor_mismatch`, and `cursor_stale`. Budget exhaustion MUST return incomplete
+or partial metadata and MUST NOT look like a complete no-match.
+
+`ViewContext.principal` is honored only when `principal_trusted=true`. Reader
+tokens match the exact trusted principal or one of its exact trusted roles.
+MCP tools do not accept a principal parameter; only the in-process host that
+constructs `MemdslMCPService` may inject one. In enforced mode, a raw `.mem`
+file containing any unauthorized declaration is not served through file
+resources.
+
 ## 8. CompliancePack
 
 `memdsl check` and MCP `memory_check` preflight a candidate against
@@ -599,6 +675,11 @@ unknowns                 constraints that cannot be checked deterministically
 Deterministic execution requires both `enforceable` and `guardable`
 capabilities. A constraint without those capabilities remains a MUST item but
 produces `needs_review` rather than being ignored.
+
+Check/compliance v2 fails closed for completeness: a potentially applicable
+constraint that is unauthorized, quarantined, or hidden by a workspace-blocking
+compiler error produces `needs_review`, never `allow`. The response does not
+disclose unauthorized ids or counts.
 
 Supported guard fields:
 
@@ -648,8 +729,9 @@ in-place `status: superseded` rewrite.
 
 Compiler/link diagnostic codes are stable; human-readable messages may become
 clearer. `revision_cycle`, ambiguous/wrong-prefix/unknown relation targets, and
-duplicate ids are errors. `supersedes_fork` is a warning in report mode because
-quarantine/strict pollution scope is not yet a public default.
+duplicate ids are errors. `supersedes_fork` remains a warning in report mode;
+its explicit Phase 5 enforcement scope is defined in section 7.5 and is never a
+legacy/report default.
 
 Duplicate ids remain visible as source occurrences in collection surfaces, but
 single-declaration explain resolution fails with an ambiguous result instead

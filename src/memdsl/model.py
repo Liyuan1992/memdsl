@@ -169,6 +169,7 @@ class Workspace:
     documents: List[Document] = field(default_factory=list, repr=False)
     schema_version: str = WORKSPACE_SCHEMA_VERSION
     linking_visibility: str = "legacy"
+    enforcement_mode: str = "legacy"
 
     # ---- construction ----
 
@@ -196,6 +197,7 @@ class Workspace:
             registry=resolved_registry,
             schema_version=resolved_registry.workspace_schema_version,
             linking_visibility=resolved_registry.linking_visibility,
+            enforcement_mode=resolved_registry.enforcement_mode,
         )
         for path in path_list:
             if os.path.isdir(path):

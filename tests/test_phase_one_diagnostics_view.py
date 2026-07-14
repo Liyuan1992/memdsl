@@ -230,7 +230,7 @@ fact topic.archived {
     assert resolve_view(compiled, context).view_id == view.view_id
 
 
-def test_phase_one_rejects_unfrozen_enforcement_modes() -> None:
+def test_phase_five_keeps_enforcement_out_of_legacy_workspaces() -> None:
     compiled = compile_workspace(workspace_from_file("revision_fork.mem"))
     context = ViewContext(
         source_fingerprint=compiled.source_fingerprint,
@@ -238,7 +238,7 @@ def test_phase_one_rejects_unfrozen_enforcement_modes() -> None:
         enforcement_mode="quarantine",
     )
 
-    with pytest.raises(ValueError, match="only enforcement_mode='report'"):
+    with pytest.raises(ValueError, match="requires memdsl.workspace.v2"):
         resolve_view(compiled, context)
 
 

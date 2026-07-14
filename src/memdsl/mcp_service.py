@@ -70,7 +70,19 @@ from memdsl.policy import (
 from memdsl.review import AuditLogError, ReviewStore, staging_dir_for
 from memdsl.review_reporting import proposal_review_metadata
 from memdsl.schema import SchemaError
-from memdsl.view import diagnostic_summary, resolve_view
+from memdsl.serving import (
+    DEFAULT_READ_MAX_BYTES,
+    MCP_CHECK_SCHEMA,
+    MCP_EXPLAIN_SCHEMA,
+    MCP_LIST_SCHEMA,
+    MCP_QUERY_SCHEMA,
+    ResolvedCursorError,
+    build_resolved_check,
+    build_resolved_explain,
+    build_resolved_list,
+    build_resolved_query,
+)
+from memdsl.view import ViewContext, diagnostic_summary, resolve_view
 
 SUMMARY_SCOPE = "read:summary"
 SEARCH_SCOPE = "read:search"
@@ -164,6 +176,9 @@ class MemdslMCPService:
         client_name: str = "",
         evidence_verifier: Optional[EvidenceVerifier] = verify_workspace_file_quote,
         context_factory: Optional[ProposalContextFactory] = None,
+        principal: str = "",
+        principal_trusted: bool = False,
+        principal_roles: Optional[Sequence[str]] = None,
     ) -> None:
         paths = [os.path.abspath(str(p)) for p in workspace_paths if str(p).strip()]
         if not paths:
@@ -180,6 +195,11 @@ class MemdslMCPService:
             raise TypeError("context_factory must be callable or None")
         self.evidence_verifier = evidence_verifier
         self.context_factory = context_factory
+        self.principal = str(principal or "")
+        self.principal_trusted = bool(principal_trusted)
+        self.principal_roles = frozenset(
+            str(item).strip() for item in (principal_roles or ())
+            if str(item).strip())
         self._staging = staging
         self._review: Optional[ReviewStore] = None
         self._ws: Optional[Workspace] = None
@@ -206,6 +226,14 @@ class MemdslMCPService:
             elif path.endswith(".mem"):
                 files.append(path)
         return sorted(files, key=lambda item: (os.path.normcase(item), item))
+
+    def readable_mem_files(self, view) -> List[str]:
+        """Return whole source files safe for the configured enforced View."""
+        files = self.mem_files()
+        if not view.enforcement_active:
+            return files
+        unauthorized_files = {item.file for item in view.unauthorized}
+        return [path for path in files if path not in unauthorized_files]
 
     def workspace(self) -> Workspace:
         """Load source and compiled indexes, reloading on any source change."""
@@ -245,6 +273,21 @@ class MemdslMCPService:
                 f"memdsl MCP scope '{scope}' is required. "
                 f"Configured scopes: {', '.join(sorted(self.scopes)) or '(none)'}"
             )
+
+    def resolved_view(self, compiled: Optional[CompiledWorkspace] = None):
+        """Resolve the configured View without accepting tool-argument identity."""
+        compiled = compiled or self.compiled_workspace()
+        if compiled.enforcement_mode not in {"quarantine", "strict"}:
+            return resolve_view(compiled)
+        return resolve_view(compiled, ViewContext(
+            source_fingerprint=compiled.source_fingerprint,
+            as_of=_dt.date.today(),
+            principal=self.principal or None,
+            principal_trusted=self.principal_trusted,
+            principal_roles=self.principal_roles,
+            compatibility_mode="workspace.v2",
+            enforcement_mode=compiled.enforcement_mode,
+        ))
 
     def _write_auto_granted(self) -> bool:
         return WRITE_AUTO_SCOPE in self.scopes or "all" in self.scopes
@@ -359,7 +402,7 @@ class MemdslMCPService:
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
         ws = compiled.workspace
-        view = resolve_view(compiled)
+        view = self.resolved_view(compiled)
         current = current_declarations(compiled)
         kinds: dict = {}
         for d in ws.declarations:
@@ -409,7 +452,7 @@ class MemdslMCPService:
         auto_today = len(_automatic_route_reservation_ids(audit, today))
         write_auto = self._write_auto_granted()
         automation_effective = self._automation_effective(policy, ws, auto_today)
-        return {
+        payload = {
             "ok": True,
             "schema_version": schema,
             "server": "memdsl",
@@ -429,6 +472,7 @@ class MemdslMCPService:
             "schema_files": list(ws.registry.schema_files),
             "workspace_schema_version": compiled.workspace_schema_version,
             "linking_visibility": compiled.linking_visibility,
+            "workspace_enforcement_mode": compiled.enforcement_mode,
             "view": view.metadata(),
             "diagnostic_summary": view.diagnostic_summary(),
             "scopes": sorted(self.scopes),
@@ -452,6 +496,43 @@ class MemdslMCPService:
                 "human-approved revision activates or supersedes them."
             ),
         }
+        if view.enforcement_active:
+            visible = (
+                tuple(view.authoritative)
+                + tuple(view.provisional)
+                + tuple(view.quarantined)
+                + tuple(
+                    item for item in view.excluded
+                    if id(item) not in {id(hidden) for hidden in view.unauthorized})
+            )
+            visible_kinds = {}
+            for declaration in visible:
+                visible_kinds[declaration.kind] = (
+                    visible_kinds.get(declaration.kind, 0) + 1)
+            readable_files = {
+                declaration.file for declaration in visible}
+            payload.update({
+                "ok": not view.blocked,
+                "schema_version": "memdsl.mcp.status.v2",
+                "status": view.status,
+                "files": len(readable_files),
+                "declarations": len(visible),
+                "active_declarations": len(view.authoritative),
+                "provisional_declarations": len(view.provisional),
+                "quarantined_declarations": len(view.quarantined),
+                "kinds": dict(sorted(visible_kinds.items())),
+                "types": dict(sorted(visible_kinds.items())),
+                "schema_files": [
+                    os.path.basename(path) for path in ws.registry.schema_files],
+                "workspace_enforcement_mode": compiled.enforcement_mode,
+                "view": view.envelope(include_diagnostics=False),
+                "diagnostic_summary": view.envelope(
+                    include_diagnostics=False,
+                    include_quarantined=False,
+                )["diagnostic_summary"],
+            })
+            payload.pop("workspace_paths", None)
+        return payload
 
     def memory_map(self) -> dict:
         """Compact per-module index of all active memory, for session start."""
@@ -461,6 +542,22 @@ class MemdslMCPService:
             compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
+        view = self.resolved_view(compiled)
+        if view.enforcement_active:
+            return {
+                "ok": False,
+                "schema_version": "memdsl.mcp.map.v2",
+                "status": "unsupported_view",
+                "view": view.envelope(include_diagnostics=False),
+                "boundary": (
+                    "Map v1 is a legacy/report projection and cannot represent "
+                    "quarantine authority safely."
+                ),
+                "next_actions": [
+                    "Use memory_catalog, memory_query, memory_list, and "
+                    "memory_explain, which return Phase 5 v2 envelopes."
+                ],
+            }
         map_data = build_memory_map(compiled)
         return {
             "ok": True,
@@ -501,8 +598,11 @@ class MemdslMCPService:
         schema = "memdsl.mcp.catalog.v1"
         try:
             compiled = self.compiled_workspace()
+            source = self.resolved_view(compiled)
+            if source.enforcement_active:
+                schema = "memdsl.mcp.catalog.v2"
             return _build_mcp_memory_catalog(
-                compiled,
+                source,
                 module=module,
                 types=types,
                 subject=subject,
@@ -546,6 +646,7 @@ class MemdslMCPService:
         types: Optional[Sequence[str]] = None,
         subject: Optional[str] = None,
         limit: int = 8,
+        max_bytes: int = DEFAULT_READ_MAX_BYTES,
     ) -> dict:
         self.require_scope(SEARCH_SCOPE)
         schema = "memdsl.mcp.query.v1"
@@ -563,6 +664,28 @@ class MemdslMCPService:
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
         limit = _clamp_int(limit, 1, 50, 8)
+        view = self.resolved_view(compiled)
+        if view.enforcement_active:
+            try:
+                return build_resolved_query(
+                    view,
+                    query_text,
+                    kinds=kinds,
+                    types=types,
+                    subject=subject,
+                    limit=limit,
+                    max_bytes=max_bytes,
+                    schema_version=MCP_QUERY_SCHEMA,
+                )
+            except ValueError as exc:
+                return {
+                    "ok": False,
+                    "schema_version": MCP_QUERY_SCHEMA,
+                    "status": "invalid",
+                    "error": "invalid_query_request",
+                    "details": [str(exc)],
+                    "next_actions": ["Correct the query budget and retry."],
+                }
         pack = build_evidence_pack(
             compiled, query_text,
             kinds=list(kinds) if kinds else None,
@@ -638,14 +761,18 @@ class MemdslMCPService:
         max_bytes: int = TRACE_DEFAULT_MAX_BYTES,
         cursor: Optional[str] = None,
         include_provisional: bool = False,
+        include_quarantined_metadata: bool = False,
     ) -> dict:
         """Return one bounded deterministic BFS Trace page."""
         self.require_scope(SEARCH_SCOPE)
         schema = "memdsl.mcp.trace.v1"
         try:
             compiled = self.compiled_workspace()
+            source = self.resolved_view(compiled)
+            if source.enforcement_active:
+                schema = "memdsl.mcp.trace.v2"
             return _build_mcp_memory_trace(
-                compiled,
+                source,
                 anchors,
                 direction=direction,
                 relations=relations,
@@ -655,6 +782,7 @@ class MemdslMCPService:
                 max_bytes=max_bytes,
                 cursor=cursor,
                 include_provisional=include_provisional,
+                include_quarantined_metadata=include_quarantined_metadata,
             )
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
@@ -693,7 +821,12 @@ class MemdslMCPService:
                 "next_actions": ["Correct the Trace request and retry."],
             }
 
-    def explain(self, decl_id: str) -> dict:
+    def explain(
+        self,
+        decl_id: str,
+        *,
+        max_bytes: int = DEFAULT_READ_MAX_BYTES,
+    ) -> dict:
         self.require_scope(SEARCH_SCOPE)
         schema = "memdsl.mcp.explain.v1"
         ref = str(decl_id or "").strip()
@@ -709,6 +842,23 @@ class MemdslMCPService:
             compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
+        view = self.resolved_view(compiled)
+        if view.enforcement_active:
+            try:
+                return build_resolved_explain(
+                    view,
+                    ref,
+                    max_bytes=max_bytes,
+                    schema_version=MCP_EXPLAIN_SCHEMA,
+                )
+            except ValueError as exc:
+                return {
+                    "ok": False,
+                    "schema_version": MCP_EXPLAIN_SCHEMA,
+                    "status": "invalid",
+                    "error": "invalid_explain_request",
+                    "details": [str(exc)],
+                }
         resolution = compiled.resolve_reference(ref)
         if resolution.status == "ambiguous":
             duplicate_full_id = bool(
@@ -787,6 +937,7 @@ class MemdslMCPService:
         subject: Optional[str] = None,
         scope: Optional[str] = None,
         exceptions: Optional[Sequence[str]] = None,
+        max_bytes: int = DEFAULT_READ_MAX_BYTES,
     ) -> dict:
         """Preflight a proposed action or draft against applicable MUST rules."""
         self.require_scope(SEARCH_SCOPE)
@@ -807,6 +958,27 @@ class MemdslMCPService:
             compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
+        view = self.resolved_view(compiled)
+        if view.enforcement_active:
+            try:
+                return build_resolved_check(
+                    view,
+                    task_text,
+                    candidate_text,
+                    subject=subject,
+                    scope=scope,
+                    exceptions=exceptions,
+                    max_bytes=max_bytes,
+                    schema_version=MCP_CHECK_SCHEMA,
+                )
+            except ValueError as exc:
+                return {
+                    "ok": False,
+                    "schema_version": MCP_CHECK_SCHEMA,
+                    "status": "invalid",
+                    "error": "invalid_check_request",
+                    "details": [str(exc)],
+                }
         pack = check_compliance(
             compiled, task_text, candidate_text,
             subject=subject or None,
@@ -844,6 +1016,9 @@ class MemdslMCPService:
         subject: Optional[str] = None,
         include_inactive: bool = False,
         limit: int = 100,
+        max_bytes: int = DEFAULT_READ_MAX_BYTES,
+        cursor: Optional[str] = None,
+        include_quarantined_metadata: bool = True,
     ) -> dict:
         self.require_scope(SUMMARY_SCOPE)
         schema = "memdsl.mcp.list.v1"
@@ -851,6 +1026,42 @@ class MemdslMCPService:
             compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
+        view = self.resolved_view(compiled)
+        if view.enforcement_active:
+            try:
+                return build_resolved_list(
+                    view,
+                    kind=kind,
+                    memory_type=memory_type,
+                    subject=subject,
+                    limit=limit,
+                    max_bytes=max_bytes,
+                    cursor=cursor,
+                    include_provisional=True,
+                    include_quarantined_metadata=include_quarantined_metadata,
+                    schema_version=MCP_LIST_SCHEMA,
+                )
+            except ResolvedCursorError as exc:
+                return {
+                    "ok": False,
+                    "schema_version": MCP_LIST_SCHEMA,
+                    "status": exc.code,
+                    "error": exc.code,
+                    "details": [str(exc)],
+                    "next_actions": [
+                        "Restart list pagination from the first page."
+                        if exc.code == "cursor_stale" else
+                        "Reuse the cursor only with the original list filters."
+                    ],
+                }
+            except ValueError as exc:
+                return {
+                    "ok": False,
+                    "schema_version": MCP_LIST_SCHEMA,
+                    "status": "invalid",
+                    "error": "invalid_list_request",
+                    "details": [str(exc)],
+                }
         limit = _clamp_int(limit, 1, 500, 100)
         pool = (
             compiled.declarations
@@ -917,12 +1128,31 @@ class MemdslMCPService:
             return self._workspace_error(schema, exc)
         ws = compiled.workspace
         diags = lint(compiled)
+        view = self.resolved_view(compiled)
+        if view.enforcement_active:
+            visible_keys = {
+                (
+                    item.code, item.severity, item.message,
+                    item.file, item.line, item.decl_id,
+                )
+                for item in view.visible_diagnostics()
+            }
+            diags = [
+                item for item in diags
+                if (
+                    item.code, item.severity, item.message,
+                    item.file, item.line, item.decl_id,
+                ) in visible_keys
+            ]
         errors = sum(1 for d in diags if d.severity == "error")
         warnings = sum(1 for d in diags if d.severity == "warning")
-        return {
-            "ok": errors == 0,
-            "schema_version": schema,
-            "status": "ok" if errors == 0 else "errors",
+        payload = {
+            "ok": errors == 0 and not view.blocked,
+            "schema_version": (
+                "memdsl.mcp.lint.v2" if view.enforcement_active else schema),
+            "status": (
+                "compiler_error" if view.blocked
+                else "ok" if errors == 0 else "errors"),
             "declarations": len(ws.declarations),
             "errors": errors,
             "warnings": warnings,
@@ -937,7 +1167,9 @@ class MemdslMCPService:
                     "code": d.code,
                     "severity": d.severity,
                     "message": d.message,
-                    "file": d.file,
+                    "file": (
+                        os.path.basename(d.file)
+                        if view.enforcement_active else d.file),
                     "line": d.line,
                     "decl_id": d.decl_id,
                 }
@@ -945,6 +1177,20 @@ class MemdslMCPService:
             ],
             "boundary": "Diagnostics describe the memory source; fixing it is a human edit, not an MCP write.",
         }
+        if view.enforcement_active:
+            safe_view_envelope = view.envelope(include_diagnostics=True)
+            payload["view"] = view.envelope(include_diagnostics=False)
+            payload["diagnostics"] = safe_view_envelope["diagnostics"]
+            payload["diagnostic_summary"] = {
+                "total": len(diags),
+                "errors": errors,
+                "warnings": warnings,
+                "view": view.envelope(
+                    include_diagnostics=False,
+                    include_quarantined=False,
+                )["diagnostic_summary"],
+            }
+        return payload
 
     # ---- governed writes ----
 
@@ -1143,19 +1389,28 @@ class MemdslMCPService:
         self.require_scope(SUMMARY_SCOPE)
         schema = "memdsl.mcp.files.v1"
         try:
-            ws = self.workspace()
+            compiled = self.compiled_workspace()
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
+        ws = compiled.workspace
+        view = self.resolved_view(compiled)
         per_file: dict = {}
         for d in ws.declarations:
             per_file[d.file] = per_file.get(d.file, 0) + 1
-        files = [
-            {"file_id": str(i), "path": path, "declarations": per_file.get(path, 0)}
-            for i, path in enumerate(self.mem_files())
-        ]
+        readable_files = self.readable_mem_files(view)
+        files = []
+        for i, path in enumerate(readable_files):
+            item = {
+                "file_id": str(i),
+                "path": (
+                    os.path.basename(path) if view.enforcement_active else path),
+                "declarations": per_file.get(path, 0),
+            }
+            files.append(item)
         return {
             "ok": True,
-            "schema_version": schema,
+            "schema_version": (
+                "memdsl.mcp.files.v2" if view.enforcement_active else schema),
             "status": "ok",
             "files": files,
             "next_actions": ["Read memdsl://file/{file_id} for the raw .mem source."],
@@ -1164,7 +1419,13 @@ class MemdslMCPService:
     def read_file(self, file_id: str) -> dict:
         self.require_scope(SUMMARY_SCOPE)
         schema = "memdsl.mcp.file.v1"
-        files = self.mem_files()
+        try:
+            compiled = self.compiled_workspace()
+        except (ParseError, SchemaError) as exc:
+            return self._workspace_error(schema, exc)
+        view = self.resolved_view(compiled)
+        all_files = self.mem_files()
+        files = self.readable_mem_files(view)
         ref = str(file_id or "").strip()
         index: Optional[int] = None
         if ref.isdigit() and int(ref) < len(files):
@@ -1175,6 +1436,20 @@ class MemdslMCPService:
                     index = i
                     break
         if index is None:
+            if view.enforcement_active and any(
+                ref and (path == ref or os.path.basename(path) == ref)
+                for path in all_files if path not in files
+            ):
+                return {
+                    "ok": False,
+                    "schema_version": "memdsl.mcp.file.v2",
+                    "status": "unauthorized",
+                    "file_id": ref,
+                    "next_actions": [
+                        "Use a trusted principal authorized for every declaration "
+                        "in the requested source file."
+                    ],
+                }
             return {
                 "ok": False,
                 "schema_version": schema,
@@ -1195,10 +1470,11 @@ class MemdslMCPService:
             }
         return {
             "ok": True,
-            "schema_version": schema,
+            "schema_version": (
+                "memdsl.mcp.file.v2" if view.enforcement_active else schema),
             "status": "ok",
             "file_id": str(index),
-            "path": path,
+            "path": os.path.basename(path) if view.enforcement_active else path,
             "content": content,
         }
 

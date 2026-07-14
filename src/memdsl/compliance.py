@@ -19,6 +19,7 @@ from typing import Dict, List, Optional, Sequence
 from memdsl.authority import current_declarations
 from memdsl.compiler import WorkspaceInput, ensure_compiled
 from memdsl.model import Declaration
+from memdsl.view import ResolvedView
 
 
 VERDICTS = ("allow", "block", "needs_review")
@@ -168,7 +169,7 @@ class CompliancePack:
 
 
 def applicable_constraints(
-    ws: WorkspaceInput,
+    ws,
     task: str,
     candidate: str = "",
     *,
@@ -184,10 +185,32 @@ def applicable_constraints(
     with the memory itself.  A declaration superseded by another
     declaration is excluded even when its status field was not updated yet.
     """
+    if isinstance(ws, ResolvedView):
+        declarations = ws.authoritative
+    else:
+        declarations = current_declarations(ensure_compiled(ws))
+    return applicable_constraints_from(
+        declarations,
+        task,
+        candidate,
+        subject=subject,
+        scope=scope,
+    )
+
+
+def applicable_constraints_from(
+    declarations: Sequence[Declaration],
+    task: str,
+    candidate: str = "",
+    *,
+    subject: Optional[str] = None,
+    scope: Optional[str] = None,
+) -> List[Declaration]:
+    """Evaluate applicability over an already authorized/classified sequence."""
     query = "\n".join(part for part in (task, candidate) if part).strip()
     query_terms = _terms(query)
     selected: Dict[str, Declaration] = {}
-    for decl in current_declarations(ensure_compiled(ws)):
+    for decl in declarations:
         if decl.runtime_role != "constraint" or decl.status != "active":
             continue
         if decl.scope == "global":
@@ -221,7 +244,7 @@ def applicable_boundaries(
 
 
 def check_compliance(
-    ws: WorkspaceInput,
+    ws,
     task: str,
     candidate: str,
     *,
@@ -235,7 +258,7 @@ def check_compliance(
     supplied_exceptions = {
         str(item).strip() for item in (exceptions or []) if str(item).strip()
     }
-    compiled = ensure_compiled(ws)
+    source = ws if isinstance(ws, ResolvedView) else ensure_compiled(ws)
     pack = CompliancePack(
         task=task_text,
         candidate=candidate_text,
@@ -244,7 +267,7 @@ def check_compliance(
         asserted_exceptions=sorted(supplied_exceptions),
     )
     pack.applicable_must = applicable_constraints(
-        compiled, task_text, candidate_text, subject=subject, scope=scope)
+        source, task_text, candidate_text, subject=subject, scope=scope)
 
     combined = "\n".join(part for part in (task_text, candidate_text) if part)
     for decl in pack.applicable_must:

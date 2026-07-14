@@ -10,7 +10,7 @@ import base64
 from collections import deque
 import hashlib
 import json
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 from memdsl.compiler import (
     RELATION_REGISTRY,
@@ -24,6 +24,8 @@ from memdsl.view import ResolvedView, resolve_view
 
 TRACE_SCHEMA = "memdsl.trace.v1"
 MCP_TRACE_SCHEMA = "memdsl.mcp.trace.v1"
+TRACE_SCHEMA_V2 = "memdsl.trace.v2"
+MCP_TRACE_SCHEMA_V2 = "memdsl.mcp.trace.v2"
 TRACE_CONTRACT_VERSION = "memdsl.trace.phase3.v1"
 TRACE_CURSOR_VERSION = 1
 TRACE_DEFAULT_MAX_DEPTH = 3
@@ -36,7 +38,7 @@ TRACE_MAX_NODES = 1000
 TRACE_MAX_EDGES = 2000
 TRACE_MAX_DEPTH = 100000
 
-TraceSource = WorkspaceInput
+TraceSource = Union[WorkspaceInput, ResolvedView]
 
 
 class TraceCursorError(ValueError):
@@ -67,12 +69,18 @@ def trace_memory(
     max_bytes: int = TRACE_DEFAULT_MAX_BYTES,
     cursor: Optional[str] = None,
     include_provisional: bool = False,
+    include_quarantined_metadata: bool = False,
 ) -> dict:
     """Return one statelessly paged BFS Trace under node/edge/byte budgets."""
+    schema_version = (
+        TRACE_SCHEMA_V2
+        if isinstance(source, ResolvedView) and source.enforcement_active
+        else TRACE_SCHEMA
+    )
     return _build_trace(
         source,
         anchors,
-        schema_version=TRACE_SCHEMA,
+        schema_version=schema_version,
         direction=direction,
         relations=relations,
         max_depth=max_depth,
@@ -81,6 +89,7 @@ def trace_memory(
         max_bytes=max_bytes,
         cursor=cursor,
         include_provisional=include_provisional,
+        include_quarantined_metadata=include_quarantined_metadata,
     )
 
 
@@ -89,10 +98,15 @@ def _build_mcp_memory_trace(
     anchors: Sequence[str],
     **kwargs,
 ) -> dict:
+    schema_version = (
+        MCP_TRACE_SCHEMA_V2
+        if isinstance(source, ResolvedView) and source.enforcement_active
+        else MCP_TRACE_SCHEMA
+    )
     return _build_trace(
         source,
         anchors,
-        schema_version=MCP_TRACE_SCHEMA,
+        schema_version=schema_version,
         **kwargs,
     )
 
@@ -110,6 +124,7 @@ def _build_trace(
     max_bytes: int,
     cursor: Optional[str],
     include_provisional: bool,
+    include_quarantined_metadata: bool = False,
 ) -> dict:
     normalized_direction = str(direction or "").strip().lower()
     if normalized_direction not in {"outgoing", "incoming", "both"}:
@@ -128,14 +143,48 @@ def _build_trace(
     )
     if not isinstance(include_provisional, bool):
         raise ValueError("include_provisional must be a boolean")
+    if not isinstance(include_quarantined_metadata, bool):
+        raise ValueError("include_quarantined_metadata must be a boolean")
     relation_filter = _normalized_relations(relations)
     unknown_relations = sorted(set(relation_filter) - set(RELATION_REGISTRY))
     if unknown_relations:
         raise ValueError(
             "unknown relation filter(s): " + ", ".join(unknown_relations))
 
-    compiled = ensure_compiled(source)
-    view = resolve_view(compiled)
+    if isinstance(source, ResolvedView):
+        view = source
+        if view.compiled is None:
+            raise ValueError("ResolvedView is not bound to a compiled workspace")
+        compiled = view.compiled
+    else:
+        compiled = ensure_compiled(source)
+        view = resolve_view(compiled)
+    enforced = view.enforcement_active
+    if view.blocked:
+        result = {
+            "ok": False,
+            "schema_version": schema_version,
+            "status": "compiler_error",
+            "view": view.envelope(include_diagnostics=False),
+            "available_nodes": 0,
+            "available_edges": 0,
+            "returned_nodes": 0,
+            "returned_edges": 0,
+            "nodes": [],
+            "tree_edges": [],
+            "back_edges": [],
+            "cross_edges": [],
+            "truncated": False,
+            "next_cursor": None,
+            "completeness": "blocked",
+            "next_actions": [
+                "Run lint and repair blocking identity/source diagnostics."
+            ],
+        }
+        if _json_bytes(result) > byte_limit:
+            raise ValueError(
+                "max_bytes is too small for the Trace error envelope")
+        return result
     if cursor:
         # Cursor revision identity wins over anchor resolution.  If Source or
         # View changed enough to remove an anchor, pagination must still fail
@@ -160,7 +209,7 @@ def _build_trace(
         declaration_id: declaration
         for declaration_id, declaration in compiled.resolved_by_id.items()
         if id(declaration) in serviceable_objects
-        if not declaration.access_policy
+        if enforced or not declaration.access_policy
     }
     canonical_anchors = _resolve_anchors(
         compiled,
@@ -180,6 +229,7 @@ def _build_trace(
         "relations": list(relation_filter),
         "max_depth": depth_limit,
         "include_provisional": include_provisional,
+        "include_quarantined_metadata": include_quarantined_metadata,
     })
     node_offset = 0
     edge_offset = 0
@@ -231,19 +281,27 @@ def _build_trace(
         cross_edges = [
             item for item in selected_edges
             if item["classification"] == "cross"]
-        return {
+        payload = {
             "ok": True,
             "schema_version": schema_version,
             "status": "ok",
-            "view": view.metadata(),
-            "diagnostic_summary": view.diagnostic_summary(),
+            "view": (
+                view.envelope(include_diagnostics=False)
+                if enforced else view.metadata()),
+            "diagnostic_summary": (
+                view.envelope(
+                    include_diagnostics=False,
+                    include_quarantined=False,
+                )["diagnostic_summary"]
+                if enforced else view.diagnostic_summary()),
             "anchors": list(canonical_anchors),
             "direction": normalized_direction,
             "relations": list(relation_filter),
             "max_depth": depth_limit,
             "visibility": {
                 "provisional_included": include_provisional,
-                "quarantined_metadata_included": False,
+                "quarantined_metadata_included": bool(
+                    enforced and include_quarantined_metadata),
                 "quarantined_nodes": len(view.quarantined),
                 "access_policy": (
                     "restricted declarations are omitted without ids or counts"
@@ -273,6 +331,13 @@ def _build_trace(
                 "Call memory_explain on relevant node ids before citing them."
             ],
         }
+        if enforced and include_quarantined_metadata:
+            payload["quarantined"] = [
+                {"id": item.id, "reasons": list(view.reasons_for(item))}
+                for item in view.quarantined[:20]
+            ]
+            payload["quarantined_truncated"] = len(view.quarantined) > 20
+        return payload
 
     selected_nodes: List[dict] = []
     selected_edges: List[dict] = []
@@ -360,7 +425,20 @@ def _resolve_anchors(
         if declaration is None:
             raise TraceAnchorError(
                 "anchor_not_found", "anchor was not found in the current source")
-        if declaration.access_policy:
+        if view.enforcement_active:
+            if any(id(item) == id(declaration) for item in view.unauthorized):
+                raise TraceAnchorError(
+                    "unauthorized",
+                    "anchor is not readable in this Trace context")
+            lane = view.lane_for(declaration)
+            if lane == "quarantined":
+                raise TraceAnchorError(
+                    "anchor_quarantined",
+                    "anchor is quarantined in this ResolvedView")
+            if lane == "excluded":
+                raise TraceAnchorError(
+                    "anchor_excluded", "anchor is excluded from this ResolvedView")
+        elif declaration.access_policy:
             raise TraceAnchorError(
                 "unauthorized", "anchor is not readable in this Trace context")
         if id(declaration) in provisional_objects and not include_provisional:

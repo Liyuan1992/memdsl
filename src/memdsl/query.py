@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from difflib import SequenceMatcher
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -19,9 +20,10 @@ from memdsl.authority import current_declarations
 from memdsl.compiler import WorkspaceInput, ensure_compiled
 from memdsl.lexical import query_terms
 from memdsl.model import Declaration
-from memdsl.view import resolve_view
+from memdsl.view import ResolvedView, resolve_view
 
 EVIDENCE_PACK_SCHEMA = "memdsl.evidence_pack.v1"
+RESOLVED_EVIDENCE_PACK_SCHEMA = "memdsl.evidence_pack.v2"
 
 def _terms(text: str) -> List[str]:
     return query_terms(text)
@@ -63,6 +65,10 @@ class EvidencePack:
     # are not active (normally lifecycle.status=candidate) are visible here
     # without acquiring normative or factual authority.
     provisional: List[ScoredDeclaration] = field(default_factory=list)
+    schema_version: str = EVIDENCE_PACK_SCHEMA
+    status: str = "ok"
+    view: Dict = field(default_factory=dict)
+    quarantine: List[dict] = field(default_factory=list)
 
     # ---- rendering ----
 
@@ -137,11 +143,14 @@ class EvidencePack:
                    "confidence": d.confidence, "lifecycle": d.lifecycle,
                    "access_policy": d.access_policy,
                    "status": d.status, "file": d.file, "line": d.line}
+            if self.schema_version != EVIDENCE_PACK_SCHEMA:
+                out.pop("access_policy", None)
+                out["file"] = os.path.basename(d.file) if d.file else d.file
             if d.evidence:
                 out["evidence"] = d.evidence
             return out
-        return {
-            "schema_version": EVIDENCE_PACK_SCHEMA,
+        payload = {
+            "schema_version": self.schema_version,
             "query": self.query,
             "resolved_subjects": self.resolved_subjects,
             "must": [decl(d) for d in self.must],
@@ -165,6 +174,13 @@ class EvidencePack:
             "missing": self.missing,
             "search_trace": self.trace,
         }
+        if self.schema_version != EVIDENCE_PACK_SCHEMA:
+            payload.update({
+                "status": self.status,
+                "view": dict(self.view),
+                "quarantine": list(self.quarantine),
+            })
+        return payload
 
     def render_json(self) -> str:
         return json.dumps(self.as_dict(), indent=2, ensure_ascii=False)
@@ -202,7 +218,10 @@ def _scored_sort_key(scored: ScoredDeclaration) -> tuple:
     )
 
 
-def _active_alias_map(ws: WorkspaceInput) -> Dict[str, List[str]]:
+def _active_alias_map(
+    ws: WorkspaceInput,
+    view: Optional[ResolvedView] = None,
+) -> Dict[str, List[str]]:
     """Aliases trusted for query routing and MUST relevance.
 
     Candidate symbols remain visible in the memory map, but must not redirect
@@ -210,14 +229,23 @@ def _active_alias_map(ws: WorkspaceInput) -> Dict[str, List[str]]:
     filter local so the older Workspace.alias_map() API retains its behavior.
     """
     compiled = ensure_compiled(ws)
-    current_objects = {id(item) for item in current_declarations(compiled)}
+    current_objects = {
+        id(item) for item in (
+            view.authoritative if view is not None
+            else current_declarations(compiled)
+        )
+    }
     amap: Dict[str, List[str]] = {}
     for alias, declarations in compiled.aliases.items():
         for decl in declarations:
             if id(decl) not in current_objects or decl.status != "active":
                 continue
             amap.setdefault(alias, []).append(decl.name)
-    for phrase, targets in compiled.dialect_aliases.items():
+    dialect_aliases = (
+        _dialect_aliases_for_view(compiled, view)
+        if view is not None else compiled.dialect_aliases
+    )
+    for phrase, targets in dialect_aliases.items():
         existing = set(amap.get(phrase, ()))
         if existing and existing != set(targets):
             continue
@@ -244,6 +272,30 @@ def build_evidence_pack(
         limit=limit,
         types=types,
         candidate_mode="indexed",
+        resolved_view=None,
+    )
+
+
+def build_resolved_evidence_pack(
+    view: ResolvedView,
+    query: str,
+    kinds: Optional[List[str]] = None,
+    subject: Optional[str] = None,
+    limit: int = 8,
+    types: Optional[List[str]] = None,
+) -> EvidencePack:
+    """Build the Phase 5 EvidencePack v2 over an enforced ResolvedView."""
+    if not isinstance(view, ResolvedView):
+        raise TypeError("view must be a ResolvedView")
+    return _build_evidence_pack(
+        view,
+        query,
+        kinds=kinds,
+        subject=subject,
+        limit=limit,
+        types=types,
+        candidate_mode="indexed",
+        resolved_view=view,
     )
 
 
@@ -264,11 +316,12 @@ def _build_evidence_pack_legacy(
         limit=limit,
         types=types,
         candidate_mode="legacy",
+        resolved_view=None,
     )
 
 
 def _build_evidence_pack(
-    ws: WorkspaceInput,
+    ws,
     query: str,
     *,
     kinds: Optional[List[str]],
@@ -276,17 +329,41 @@ def _build_evidence_pack(
     limit: int,
     types: Optional[List[str]],
     candidate_mode: str,
+    resolved_view: Optional[ResolvedView],
 ) -> EvidencePack:
     """Shared EvidencePack semantics over indexed or legacy candidates."""
-    compiled = ensure_compiled(ws)
-    current = current_declarations(compiled)
+    if resolved_view is not None:
+        if resolved_view.compiled is None:
+            raise ValueError("ResolvedView is not bound to a compiled workspace")
+        compiled = resolved_view.compiled
+        view = resolved_view
+        current = list(view.authoritative) + list(view.provisional)
+    else:
+        compiled = ensure_compiled(ws)
+        current = current_declarations(compiled)
+        view = resolve_view(compiled)
     current_objects = {id(item) for item in current}
-    view = resolve_view(compiled)
-    pack = EvidencePack(query=query)
+    pack = EvidencePack(
+        query=query,
+        schema_version=(
+            RESOLVED_EVIDENCE_PACK_SCHEMA
+            if resolved_view is not None else EVIDENCE_PACK_SCHEMA),
+        view=(view.envelope(include_diagnostics=False) if resolved_view else {}),
+    )
+    if resolved_view is not None and view.blocked:
+        pack.status = "compiler_error"
+        pack.trace = {
+            "view_id": view.view_id,
+            "source_fingerprint": compiled.source_fingerprint,
+            "indexes_used": [],
+            "quarantined_matches": [],
+            "truncated": False,
+        }
+        return pack
     query_terms = _terms(query)
 
     # alias resolution: map query words/phrases to canonical symbols
-    amap = _active_alias_map(compiled)
+    amap = _active_alias_map(compiled, view if resolved_view else None)
     subject_hits: List[str] = []
     lowered = query.lower()
     for alias, symbols in amap.items():
@@ -456,6 +533,7 @@ def _build_evidence_pack(
                 view.authoritative,
                 query_terms,
                 query,
+                include_restricted=resolved_view is not None,
             )
         )
     dialect_candidate = _dialect_candidate(
@@ -504,10 +582,77 @@ def _build_evidence_pack(
             or suggestions_truncated
         ),
     }
+    if resolved_view is not None:
+        quarantined_matches = sorted(
+            (
+                _score(item, query_terms, [], subject_routable=False)
+                for item in view.quarantined
+                if item.has_capability("searchable")
+            ),
+            key=_scored_sort_key,
+        )
+        quarantined_matches = [
+            item for item in quarantined_matches if item.score > 0]
+        pack.quarantine = [
+            {
+                "id": item.declaration.id,
+                "reasons": list(view.reasons_for(item.declaration)),
+                "matched_terms": list(item.matched_terms),
+            }
+            for item in quarantined_matches[:5]
+        ]
+        pack.trace["quarantined_matches"] = list(pack.quarantine)
+        strongest_quarantine = (
+            quarantined_matches[0].score if quarantined_matches else 0.0)
+        strongest_active = active_hits[0].score if active_hits else 0.0
+        if quarantined_matches and strongest_quarantine >= strongest_active:
+            pack.status = "quarantined"
+        elif active_hits:
+            pack.status = "ok"
+        elif provisional_hits:
+            pack.status = "provisional_only"
+        else:
+            pack.status = "no_match"
+        pack.trace["truncated"] = bool(
+            pack.trace["truncated"] or len(quarantined_matches) > 5)
     if dialect_candidate is not None:
         pack.trace["dialect_candidate"] = dialect_candidate
 
     return pack
+
+
+def _dialect_aliases_for_view(compiled, view: ResolvedView) -> dict:
+    """Keep Phase 4 dialect routing only when its source remains authoritative."""
+    authoritative_objects = {id(item) for item in view.authoritative}
+    authoritative_symbols = {
+        item.name for item in view.authoritative
+        if item.runtime_role == "symbol" and item.status == "active"
+    }
+    mapping_sources = {}
+    for declaration in view.authoritative:
+        if not declaration.has_capability("dialect_mapping"):
+            continue
+        phrases = declaration.field("phrases")
+        target = declaration.field("target")
+        if not isinstance(phrases, list) or not isinstance(target, str):
+            continue
+        if id(declaration) not in authoritative_objects:
+            continue
+        for phrase in phrases:
+            mapping_sources.setdefault(str(phrase).strip().lower(), set()).add(target)
+    return {
+        phrase: tuple(
+            target for target in targets
+            if target in authoritative_symbols
+            if target in mapping_sources.get(phrase, set())
+        )
+        for phrase, targets in compiled.dialect_aliases.items()
+        if any(
+            target in authoritative_symbols
+            and target in mapping_sources.get(phrase, set())
+            for target in targets
+        )
+    }
 
 
 def _indexed_candidate_pool(
@@ -541,13 +686,14 @@ def _vocabulary_suggestions(
     query: str,
     *,
     limit: int = 5,
+    include_restricted: bool = False,
 ) -> Tuple[List[dict], List[str], bool]:
     """Suggest active public workspace vocabulary without changing routing."""
     vocabulary: Dict[Tuple[str, str], set] = {}
     authoritative_objects = {id(item) for item in authoritative}
     public = [
         declaration for declaration in authoritative
-        if not declaration.access_policy
+        if include_restricted or not declaration.access_policy
     ]
     for declaration in public:
         if declaration.runtime_role == "symbol":
@@ -576,7 +722,7 @@ def _vocabulary_suggestions(
         for declaration in compiled.declarations
         if id(declaration) in authoritative_objects
         if declaration.runtime_role == "symbol"
-        if not declaration.access_policy
+        if include_restricted or not declaration.access_policy
     }
     ranked = []
     category_priority = {

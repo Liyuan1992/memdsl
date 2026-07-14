@@ -239,6 +239,14 @@ def lint(ws: WorkspaceInput, today: Optional[_dt.date] = None) -> List[Diagnosti
         if (descriptor is not None
                 and descriptor.has_capability("temporal")
                 and d.status == "active"):
+            for field_name in ("as_of", "valid_until"):
+                raw_date = d.lifecycle.get(field_name)
+                if raw_date is not None and _parse_date(raw_date) is None:
+                    diags.append(Diagnostic(
+                        "invalid_lifecycle_date", "error",
+                        f"temporal memory '{d.id}' {field_name} must be an "
+                        "ISO date (YYYY-MM-DD)",
+                        d.file, d.line, d.id))
             valid_until = _parse_date(d.lifecycle.get("valid_until"))
             as_of = _parse_date(d.lifecycle.get("as_of"))
             stale_code = _code(d, "stale", "stale_memory")

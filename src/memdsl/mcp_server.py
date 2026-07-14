@@ -33,6 +33,9 @@ SERVER_INSTRUCTIONS = (
     "constraints, SHOULD items are active guidance, CONTEXT items are active "
     "assertions, and PROVISIONAL items are non-active, unconfirmed candidates "
     "that never carry MUST/SHOULD/CONTEXT/MISSING/compliance authority. "
+    "In an explicitly enforced workspace, v2 envelopes distinguish no_match, "
+    "provisional_only, quarantined, unauthorized, compiler_error, and stale "
+    "cursor outcomes; never treat quarantine or an unreadable rule as absence. "
     "CONFLICT items must be surfaced to the user, and MISSING items are known "
     "gaps. A no_match result is a retry signal, not "
     "proof of absence: check search_trace for filter exclusions, re-query "
@@ -134,11 +137,12 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         types: Optional[List[str]] = None,
         subject: str = "",
         limit: int = 8,
+        max_bytes: int = 16384,
     ) -> dict:
         """Query memory into MUST/SHOULD/CONTEXT/PROVISIONAL/CONFLICT/MISSING layers."""
         return svc.query(
             query, kinds=kinds, types=types,
-            subject=subject or None, limit=limit)
+            subject=subject or None, limit=limit, max_bytes=max_bytes)
 
     @mcp.tool(name="memory_trace")
     def memory_trace(
@@ -151,6 +155,7 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         max_bytes: int = 8192,
         cursor: str = "",
         include_provisional: bool = False,
+        include_quarantined_metadata: bool = False,
     ) -> dict:
         """Traverse explicit relations with deterministic BFS and hard depth/node/edge/byte budgets; graph connectivity is not proof."""
         return svc.trace(
@@ -163,6 +168,7 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
             max_bytes=max_bytes,
             cursor=cursor or None,
             include_provisional=include_provisional,
+            include_quarantined_metadata=include_quarantined_metadata,
         )
 
     @mcp.tool(name="memory_check")
@@ -172,6 +178,7 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         subject: str = "",
         scope: str = "",
         exceptions: Optional[List[str]] = None,
+        max_bytes: int = 16384,
     ) -> dict:
         """Preflight a proposed action or draft against applicable MUST constraints."""
         return svc.check(
@@ -179,6 +186,7 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
             subject=subject or None,
             scope=scope or None,
             exceptions=exceptions,
+            max_bytes=max_bytes,
         )
 
     @mcp.tool(name="memory_types")
@@ -187,9 +195,9 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         return svc.list_types()
 
     @mcp.tool(name="memory_explain")
-    def memory_explain(id: str) -> dict:
+    def memory_explain(id: str, max_bytes: int = 16384) -> dict:
         """Show one declaration with its evidence, relations, and reverse references."""
-        return svc.explain(id)
+        return svc.explain(id, max_bytes=max_bytes)
 
     @mcp.tool(name="memory_list")
     def memory_list(
@@ -198,6 +206,9 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         subject: str = "",
         include_inactive: bool = False,
         limit: int = 100,
+        max_bytes: int = 16384,
+        cursor: str = "",
+        include_quarantined_metadata: bool = True,
     ) -> dict:
         """Browse declarations, optionally filtered by memory type or subject."""
         return svc.list_declarations(
@@ -206,6 +217,9 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
             subject=subject or None,
             include_inactive=include_inactive,
             limit=limit,
+            max_bytes=max_bytes,
+            cursor=cursor or None,
+            include_quarantined_metadata=include_quarantined_metadata,
         )
 
     @mcp.tool(name="memory_lint")

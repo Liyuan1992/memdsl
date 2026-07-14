@@ -21,6 +21,8 @@ from memdsl.view import ResolvedView, resolve_view
 
 CATALOG_SCHEMA = "memdsl.catalog.v1"
 MCP_CATALOG_SCHEMA = "memdsl.mcp.catalog.v1"
+CATALOG_SCHEMA_V2 = "memdsl.catalog.v2"
+MCP_CATALOG_SCHEMA_V2 = "memdsl.mcp.catalog.v2"
 CATALOG_CONTRACT_VERSION = "memdsl.catalog.phase2.v1"
 CATALOG_CURSOR_VERSION = 1
 CATALOG_DEFAULT_LIMIT = 20
@@ -66,9 +68,14 @@ def build_memory_catalog(
     normalized filters, order, and representation.  A cursor from another
     source revision raises ``CatalogCursorError(code='cursor_stale')``.
     """
+    schema_version = (
+        CATALOG_SCHEMA_V2
+        if isinstance(source, ResolvedView) and source.enforcement_active
+        else CATALOG_SCHEMA
+    )
     return _build_memory_catalog(
         source,
-        schema_version=CATALOG_SCHEMA,
+        schema_version=schema_version,
         module=module,
         types=types,
         subject=subject,
@@ -86,8 +93,13 @@ def _build_mcp_memory_catalog(
     **kwargs,
 ) -> dict:
     """Build the MCP schema variant while preserving the same byte budget."""
+    schema_version = (
+        MCP_CATALOG_SCHEMA_V2
+        if isinstance(source, ResolvedView) and source.enforcement_active
+        else MCP_CATALOG_SCHEMA
+    )
     return _build_memory_catalog(
-        source, schema_version=MCP_CATALOG_SCHEMA, **kwargs)
+        source, schema_version=schema_version, **kwargs)
 
 
 def _build_memory_catalog(
@@ -130,6 +142,28 @@ def _build_memory_catalog(
         view = source
     else:
         view = resolve_view(ensure_compiled(source))
+    enforced = view.enforcement_active
+    if view.blocked:
+        result = {
+            "ok": False,
+            "schema_version": schema_version,
+            "status": "compiler_error",
+            "view": view.envelope(include_diagnostics=False),
+            "summary": view.public_counts(),
+            "returned_items": 0,
+            "available_items": 0,
+            "items": [],
+            "truncated": False,
+            "next_cursor": None,
+            "completeness": "blocked",
+            "next_actions": [
+                "Run lint and repair blocking identity/source diagnostics."
+            ],
+        }
+        if _json_bytes(result) > byte_limit:
+            raise ValueError(
+                "max_bytes is too small for the Catalog error envelope")
+        return result
     authoritative_objects = {id(item) for item in view.authoritative}
     serviceable = tuple(view.authoritative) + tuple(view.provisional)
     filtered = tuple(
@@ -188,6 +222,8 @@ def _build_memory_catalog(
         "declarations_quarantined": len(view.quarantined),
         "totals": "exact",
     }
+    if enforced:
+        summary["declarations_excluded"] = view.public_counts()["excluded"]
     vocabulary = _catalog_vocabulary(filtered)
     compact_vocabulary = {
         key: value
@@ -223,8 +259,15 @@ def _build_memory_catalog(
             "ok": True,
             "schema_version": schema_version,
             "status": "ok",
-            "view": view.metadata(),
-            "diagnostic_summary": view.diagnostic_summary(),
+            "view": (
+                view.envelope(include_diagnostics=False)
+                if enforced else view.metadata()),
+            "diagnostic_summary": (
+                view.envelope(
+                    include_diagnostics=False,
+                    include_quarantined=False,
+                )["diagnostic_summary"]
+                if enforced else view.diagnostic_summary()),
             "filters": filters,
             "order": normalized_order,
             "representation": normalized_representation,
@@ -241,6 +284,12 @@ def _build_memory_catalog(
             ),
             "next_actions": next_actions,
         }
+        if enforced:
+            payload["quarantined"] = [
+                {"id": item.id, "reasons": list(view.reasons_for(item))}
+                for item in view.quarantined[:20]
+            ]
+            payload["quarantined_truncated"] = len(view.quarantined) > 20
         if normalized_representation == "structured":
             payload["items"] = list(selected)
         else:

@@ -62,6 +62,13 @@ from memdsl.review_reporting import (
     review_stats,
 )
 from memdsl.schema import SchemaError
+from memdsl.serving import (
+    DEFAULT_READ_MAX_BYTES,
+    build_resolved_check,
+    build_resolved_explain,
+    build_resolved_query,
+)
+from memdsl.view import resolve_view
 
 
 DEFAULT_REVIEW_POLICY = {
@@ -154,6 +161,7 @@ def main(argv: List[str] = None) -> int:
                          help="restrict to memory type (repeatable; --kind is deprecated)")
     p_query.add_argument("--subject", help="restrict to a subject symbol")
     p_query.add_argument("--limit", type=int, default=8)
+    p_query.add_argument("--max-bytes", type=int, default=DEFAULT_READ_MAX_BYTES)
     p_query.add_argument("--json", action="store_true", help="JSON output")
 
     p_trace = sub.add_parser(
@@ -193,6 +201,8 @@ def main(argv: List[str] = None) -> int:
     p_explain = sub.add_parser("explain", help="show one declaration")
     p_explain.add_argument("paths", nargs="+", help=".mem files or directories")
     p_explain.add_argument("id", help="declaration id (type:name or name)")
+    p_explain.add_argument("--max-bytes", type=int, default=DEFAULT_READ_MAX_BYTES)
+    p_explain.add_argument("--json", action="store_true", help="JSON output")
 
     p_types = sub.add_parser(
         "types", help="list loaded standard and domain memory types")
@@ -215,6 +225,7 @@ def main(argv: List[str] = None) -> int:
                          dest="exceptions",
                          help="assert an allowed exception (repeatable)")
     p_check.add_argument("--json", action="store_true", help="JSON output")
+    p_check.add_argument("--max-bytes", type=int, default=DEFAULT_READ_MAX_BYTES)
 
     p_review = sub.add_parser(
         "review", help="governed review queue and policy routing")
@@ -309,7 +320,20 @@ def main(argv: List[str] = None) -> int:
 
     if args.command == "map":
         ws = _load(args.paths)
-        map_data = build_memory_map(ws)
+        compiled = compile_workspace(ws, paths=args.paths)
+        view = resolve_view(compiled)
+        if view.enforcement_active:
+            payload = {
+                "schema_version": "memdsl.map.v2",
+                "status": "unsupported_view",
+                "view": view.envelope(include_diagnostics=False),
+                "next_actions": [
+                    "Use memdsl catalog/query/trace/explain for quarantine-aware reads."
+                ],
+            }
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+            return 2
+        map_data = build_memory_map(compiled)
         if args.json:
             print(json.dumps(
                 {"schema_version": "memdsl.map.v1", **map_data},
@@ -321,11 +345,15 @@ def main(argv: List[str] = None) -> int:
     if args.command == "catalog":
         ws = _load(args.paths)
         compiled = compile_workspace(ws, paths=args.paths)
+        view = resolve_view(compiled)
+        catalog_schema = (
+            "memdsl.catalog.v2" if view.enforcement_active
+            else "memdsl.catalog.v1")
         representation = args.representation or (
             "structured" if args.json else "text")
         try:
             payload = build_memory_catalog(
-                compiled,
+                view if view.enforcement_active else compiled,
                 module=args.module,
                 types=args.types,
                 subject=args.subject,
@@ -338,7 +366,7 @@ def main(argv: List[str] = None) -> int:
             )
         except CatalogCursorError as exc:
             error = {
-                "schema_version": "memdsl.catalog.v1",
+                "schema_version": catalog_schema,
                 "status": exc.code,
                 "error": exc.code,
                 "details": [str(exc)],
@@ -351,7 +379,7 @@ def main(argv: List[str] = None) -> int:
         except ValueError as exc:
             if args.json:
                 print(json.dumps({
-                    "schema_version": "memdsl.catalog.v1",
+                    "schema_version": catalog_schema,
                     "status": "invalid",
                     "error": "invalid_catalog_request",
                     "details": [str(exc)],
@@ -367,6 +395,23 @@ def main(argv: List[str] = None) -> int:
 
     if args.command == "query":
         ws = _load(args.paths)
+        compiled = compile_workspace(ws, paths=args.paths)
+        view = resolve_view(compiled)
+        if view.enforcement_active:
+            try:
+                payload = build_resolved_query(
+                    view,
+                    args.query,
+                    kinds=args.kinds,
+                    subject=args.subject,
+                    limit=args.limit,
+                    max_bytes=args.max_bytes,
+                )
+            except ValueError as exc:
+                print(f"invalid query request: {exc}", file=sys.stderr)
+                return 2
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+            return 0 if payload["status"] in {"ok", "provisional_only"} else 1
         pack = build_evidence_pack(ws, args.query, kinds=args.kinds,
                                    subject=args.subject, limit=args.limit)
         print(pack.render_json() if args.json else pack.render_text())
@@ -375,9 +420,13 @@ def main(argv: List[str] = None) -> int:
     if args.command == "trace":
         ws = _load(args.paths)
         compiled = compile_workspace(ws, paths=args.paths)
+        view = resolve_view(compiled)
+        trace_schema = (
+            "memdsl.trace.v2" if view.enforcement_active
+            else "memdsl.trace.v1")
         try:
             payload = trace_memory(
-                compiled,
+                view if view.enforcement_active else compiled,
                 [args.id] + list(args.anchor or []),
                 direction=args.direction,
                 relations=args.relations,
@@ -390,7 +439,7 @@ def main(argv: List[str] = None) -> int:
             )
         except TraceCursorError as exc:
             error = {
-                "schema_version": "memdsl.trace.v1",
+                "schema_version": trace_schema,
                 "status": exc.code,
                 "error": exc.code,
                 "details": [str(exc)],
@@ -402,7 +451,7 @@ def main(argv: List[str] = None) -> int:
             return 1
         except TraceAnchorError as exc:
             error = {
-                "schema_version": "memdsl.trace.v1",
+                "schema_version": trace_schema,
                 "status": exc.code,
                 "error": exc.code,
                 "details": [str(exc)],
@@ -415,7 +464,7 @@ def main(argv: List[str] = None) -> int:
         except ValueError as exc:
             if args.json:
                 print(json.dumps({
-                    "schema_version": "memdsl.trace.v1",
+                    "schema_version": trace_schema,
                     "status": "invalid",
                     "error": "invalid_trace_request",
                     "details": [str(exc)],
@@ -425,11 +474,29 @@ def main(argv: List[str] = None) -> int:
             return 2
         print(json.dumps(payload, indent=2, ensure_ascii=False)
               if args.json else render_trace_text(payload))
-        return 0
+        return 0 if payload.get("ok", True) else 1
 
     if args.command == "explain":
         ws = _load(args.paths)
-        print(explain(ws, args.id))
+        compiled = compile_workspace(ws, paths=args.paths)
+        view = resolve_view(compiled)
+        if view.enforcement_active:
+            try:
+                payload = build_resolved_explain(
+                    view, args.id, max_bytes=args.max_bytes)
+            except ValueError as exc:
+                print(f"invalid explain request: {exc}", file=sys.stderr)
+                return 2
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+            return 0 if payload.get("ok") else 1
+        if args.json:
+            service_payload = {
+                "schema_version": "memdsl.explain.v1",
+                "rendered_text": explain(compiled, args.id),
+            }
+            print(json.dumps(service_payload, indent=2, ensure_ascii=False))
+        else:
+            print(explain(compiled, args.id))
         return 0
 
     if args.command == "types":
@@ -463,8 +530,31 @@ def main(argv: List[str] = None) -> int:
         if not str(args.task or "").strip() or not str(candidate_text or "").strip():
             print("task and candidate must both be non-empty", file=sys.stderr)
             return 2
+        compiled = compile_workspace(ws, paths=args.paths)
+        view = resolve_view(compiled)
+        if view.enforcement_active:
+            try:
+                payload = build_resolved_check(
+                    view,
+                    args.task,
+                    candidate_text,
+                    subject=args.subject,
+                    scope=args.scope,
+                    exceptions=args.exceptions,
+                    max_bytes=args.max_bytes,
+                )
+            except ValueError as exc:
+                print(f"invalid check request: {exc}", file=sys.stderr)
+                return 2
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+            verdict = payload.get(
+                "verdict",
+                payload.get("compliance_pack", {}).get("verdict", "needs_review"),
+            )
+            return {"allow": 0, "block": 1, "needs_review": 2}.get(
+                verdict, 2)
         pack = check_compliance(
-            ws, args.task, candidate_text,
+            compiled, args.task, candidate_text,
             subject=args.subject,
             scope=args.scope,
             exceptions=args.exceptions,

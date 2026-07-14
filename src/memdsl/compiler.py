@@ -20,7 +20,7 @@ from memdsl.lexical import query_terms
 from memdsl.model import Declaration, EXCLUDED_STATUSES, RELATION_FIELDS, Workspace
 
 
-COMPILER_CONTRACT_VERSION = "memdsl.compiler.phase4.v1"
+COMPILER_CONTRACT_VERSION = "memdsl.compiler.phase5.v1"
 
 
 @dataclass(frozen=True)
@@ -131,6 +131,7 @@ class CompiledWorkspace:
     uses_by_file: Mapping[str, Tuple[UseResolution, ...]]
     workspace_schema_version: str
     linking_visibility: str
+    enforcement_mode: str
     dialect_mapping_types: Tuple[str, ...]
     dialect_aliases: Mapping[str, Tuple[str, ...]]
     dialect_targets: Mapping[str, Tuple[str, ...]]
@@ -516,6 +517,7 @@ def compile_workspace(
         uses_by_file=uses_by_file,
         workspace_schema_version=workspace.schema_version,
         linking_visibility=workspace.linking_visibility,
+        enforcement_mode=workspace.enforcement_mode,
         dialect_mapping_types=dialect_mapping_types,
         dialect_aliases=dialect_aliases,
         dialect_targets=dialect_targets,
@@ -1287,6 +1289,7 @@ def _in_memory_workspace_payload(workspace: Workspace) -> dict:
     return {
         "workspace_schema_version": workspace.schema_version,
         "linking_visibility": workspace.linking_visibility,
+        "enforcement_mode": workspace.enforcement_mode,
         "declarations": declarations,
         "documents": documents,
         "types": descriptors,
