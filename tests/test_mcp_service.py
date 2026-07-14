@@ -199,10 +199,27 @@ def test_memory_map_payload(service):
     assert payload["boundary"]
 
 
+def test_memory_catalog_payload_is_bounded_and_separate_from_map_v1(service):
+    payload = service.catalog(limit=1, max_bytes=4096)
+    assert payload["ok"] is True
+    assert payload["schema_version"] == "memdsl.mcp.catalog.v1"
+    assert payload["representation"] == "structured"
+    assert payload["returned_items"] == 1
+    assert "items" in payload and "rendered_text" not in payload
+    encoded = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    assert len(encoded) <= 4096
+    # The compatibility surface is unchanged and still uses its v1 schema.
+    assert service.memory_map()["schema_version"] == "memdsl.mcp.map.v1"
+
+
 def test_memory_map_scope_enforced(workspace_dir):
     svc = MemdslMCPService([str(workspace_dir)], scopes="read:search")
     with pytest.raises(MCPScopeError):
         svc.memory_map()
+    with pytest.raises(MCPScopeError):
+        svc.catalog()
 
 
 def test_check_blocks_candidate_and_requires_both_inputs(service):

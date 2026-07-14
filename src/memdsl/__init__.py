@@ -21,6 +21,11 @@ from memdsl.query import (
     workspace_vocabulary,
 )
 from memdsl.compliance import check_compliance, CompliancePack
+from memdsl.navigation import (
+    CATALOG_SCHEMA,
+    CatalogCursorError,
+    build_memory_catalog,
+)
 from memdsl.policy import (
     AUTO_APPROVABLE_CAPABILITY,
     POLICY_VERSION,
@@ -64,6 +69,9 @@ __all__ = [
     "build_memory_map",
     "render_memory_map_text",
     "workspace_vocabulary",
+    "build_memory_catalog",
+    "CATALOG_SCHEMA",
+    "CatalogCursorError",
     "EvidencePack",
     "EVIDENCE_PACK_SCHEMA",
     "check_compliance",

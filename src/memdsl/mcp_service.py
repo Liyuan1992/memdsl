@@ -36,6 +36,12 @@ from memdsl.compiler import (
 from memdsl.compliance import check_compliance
 from memdsl.linter import lint
 from memdsl.model import Workspace, Declaration
+from memdsl.navigation import (
+    CATALOG_DEFAULT_LIMIT,
+    CATALOG_DEFAULT_MAX_BYTES,
+    CatalogCursorError,
+    _build_mcp_memory_catalog,
+)
 from memdsl.parser import ParseError
 from memdsl.query import (
     build_evidence_pack,
@@ -73,12 +79,14 @@ QUERY_BOUNDARY = (
 
 RESOURCE_URIS = (
     "memdsl://status",
+    "memdsl://catalog",
     "memdsl://map",
     "memdsl://types",
     "memdsl://files",
 )
 
 TOOL_NAMES = (
+    "memory_catalog",
     "memory_map",
     "memory_query",
     "memory_check",
@@ -462,6 +470,61 @@ class MemdslMCPService:
                 "Call memory_explain on an id for full evidence and relations.",
             ],
         }
+
+    def catalog(
+        self,
+        *,
+        module: Optional[str] = None,
+        types: Optional[Sequence[str]] = None,
+        subject: Optional[str] = None,
+        statuses: Optional[Sequence[str]] = None,
+        limit: int = CATALOG_DEFAULT_LIMIT,
+        max_bytes: int = CATALOG_DEFAULT_MAX_BYTES,
+        cursor: Optional[str] = None,
+        order: str = "asc",
+        representation: str = "structured",
+    ) -> dict:
+        """Return one bounded Catalog page without changing Map v1."""
+        self.require_scope(SUMMARY_SCOPE)
+        schema = "memdsl.mcp.catalog.v1"
+        try:
+            compiled = self.compiled_workspace()
+            return _build_mcp_memory_catalog(
+                compiled,
+                module=module,
+                types=types,
+                subject=subject,
+                statuses=statuses,
+                limit=limit,
+                max_bytes=max_bytes,
+                cursor=cursor,
+                order=order,
+                representation=representation,
+            )
+        except (ParseError, SchemaError) as exc:
+            return self._workspace_error(schema, exc)
+        except CatalogCursorError as exc:
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": exc.code,
+                "error": exc.code,
+                "details": [str(exc)],
+                "next_actions": [
+                    "Restart Catalog pagination from the first page."
+                    if exc.code == "cursor_stale" else
+                    "Reuse the cursor only with the original filters, order, and representation."
+                ],
+            }
+        except ValueError as exc:
+            return {
+                "ok": False,
+                "schema_version": schema,
+                "status": "invalid",
+                "error": "invalid_catalog_request",
+                "details": [str(exc)],
+                "next_actions": ["Correct the Catalog filters or budget and retry."],
+            }
 
     def query(
         self,

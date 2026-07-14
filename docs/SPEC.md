@@ -431,18 +431,50 @@ declarations match, MISSING still reports that no active declaration matched;
 filter-hidden counts and wording likewise refer explicitly to active
 declarations.
 
-### 7.2 Navigation: memory map and vocabulary
+### 7.2 Navigation: bounded Catalog, legacy memory map, and vocabulary
 
-Agent-driven reading needs an index the agent can hold in context before it
-queries. `build_memory_map` produces a compact per-module index of the shared
+Agent-driven reading starts with the bounded Catalog. `build_memory_catalog`
+returns `memdsl.catalog.v1`; CLI `memdsl catalog` uses the same schema and MCP
+`memory_catalog` / `memdsl://catalog` return `memdsl.mcp.catalog.v1`.
+
+Catalog pages summarize modules instead of enumerating declarations. They can
+filter by exact module, memory type, subject, and lifecycle status. Each module
+item contains exact declaration/authority counts plus bounded type,
+runtime-role, status, and subject dimensions. The response always carries:
+
+```text
+returned_items / available_items
+truncated / next_cursor / completeness
+view_id / source_fingerprint
+representation = structured | text
+```
+
+The default page uses `limit=20` and `max_bytes=8192`. `max_bytes` is measured
+over canonical compact UTF-8 JSON, including `rendered_text` in text mode.
+Structured mode returns `items` and no rendered text; text mode returns
+`rendered_text` and no duplicate structured items. Module/dimension labels and
+dimension counts are independently bounded, so a declaration with very large
+aliases or lifecycle metadata cannot bypass the page budget.
+
+The opaque stateless cursor binds the source fingerprint, report-only view id,
+normalized filters, order, representation, schema, and Catalog contract.
+Changing Source/View returns `cursor_stale`; changing filters, order, or
+representation returns `cursor_mismatch`. Page totals are exact because the
+reference implementation performs one deterministic pass over the report-only
+service set; they are not a promise of sublinear total-count cost.
+
+Catalog vocabulary dimensions always expose `<name>_total` and
+`<name>_truncated`. The legacy `workspace_vocabulary` v1 shape remains
+unchanged when complete, but additively exposes matching metadata whenever its
+50-item compatibility slice truncates subjects, scopes, or modules.
+
+`build_memory_map`, CLI `memdsl map`, MCP `memory_map`, and `memdsl://map`
+remain the legacy v1 full navigation surface. They still enumerate the shared
 current service set after lifecycle-safe supersede exclusion (id, type,
-runtime role, lifecycle status, subject, scope, truncated claim) plus the
-workspace vocabulary (`subjects` with aliases, `scopes`, `modules`, `types`).
-Candidate entries are visibly provisional; they are not active authority and
-their relations cannot hide active entries. `workspace_vocabulary` is also
-returned on no-match MCP queries so an agent can re-ask in the workspace's own
-words. The map is a navigation projection, never a citation source: items
-carry no evidence and claims are truncated.
+runtime role, lifecycle status, subject, scope, truncated claim) and include
+workspace vocabulary with aliases. Candidate entries are visibly provisional;
+they are not active authority and their relations cannot hide active entries.
+Map and Catalog are navigation projections, never citation sources.
 
 ## 8. CompliancePack
 
@@ -654,16 +686,16 @@ MCP resource memdsl://types
 The memory itself is navigable through:
 
 ```text
-Python       build_memory_map / workspace_vocabulary
-CLI          memdsl map <workspace> [--json]
-MCP tool     memory_map
-MCP resource memdsl://map
+Python       build_memory_catalog / build_memory_map / workspace_vocabulary
+CLI          memdsl catalog <workspace> [...] / memdsl map <workspace> [--json]
+MCP tool     memory_catalog / memory_map
+MCP resource memdsl://catalog / memdsl://map
 ```
 
 Agents should inspect loaded types before proposing memory instead of
-inventing a standard taxonomy, and read the memory map at session start so
-retrieval starts from knowledge of what exists rather than from a blind
-similarity guess.
+inventing a standard taxonomy, and read the bounded Catalog at session start
+so retrieval starts from knowledge of what exists rather than from a blind
+similarity guess. Map v1 remains available for older clients.
 
 ## 12. Compliance evaluation
 

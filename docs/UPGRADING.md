@@ -94,6 +94,37 @@ These diagnostics can make an already structurally broken workspace fail
 there is no `.mem` syntax migration. Internal compiler/View classes are not yet
 stable package-root Python API.
 
+### Bounded Catalog navigation (Phase 2 source line)
+
+Phase 2 adds a new surface instead of changing Map v1:
+
+- Python: `build_memory_catalog()` and `CATALOG_SCHEMA = "memdsl.catalog.v1"`;
+- CLI: `memdsl catalog PATH...`;
+- MCP: `memory_catalog` and `memdsl://catalog`, using
+  `memdsl.mcp.catalog.v1`.
+
+The Catalog groups the report-only service set by module and supports exact
+module/type/subject/lifecycle-status filters. Defaults are `limit=20` and
+`max_bytes=8192`, where bytes mean canonical compact UTF-8 JSON. Structured and
+text representations are mutually exclusive, so `rendered_text` cannot bypass
+the byte budget by duplicating structured items.
+
+Catalog cursors are opaque and stateless. They bind source fingerprint,
+report-only view id, normalized filters, order, and representation. A Source or
+View change returns `cursor_stale`; changing request identity returns
+`cursor_mismatch`. Restart at the first page rather than combining pages from
+different revisions.
+
+`workspace_vocabulary()` remains v1-compatible when its old 50-item slice is
+complete. When subjects, scopes, or modules are truncated it now additively
+returns `<name>_total` and `<name>_truncated`, eliminating silent truncation.
+
+No `.mem` migration is required. `memory_map`, `memdsl://map`, CLI `memdsl map`,
+and Python `build_memory_map()` remain available with v1 semantics. Update new
+clients to start with Catalog; legacy clients may continue using Map. Catalog
+does not alter query or compliance: hard constraints are still evaluated by the
+complete authority path, independent of Catalog item/byte budgets.
+
 ### MCP propose payload
 
 `memory_propose` now returns `memdsl.mcp.propose.v2`. Successful payloads

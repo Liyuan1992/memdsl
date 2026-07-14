@@ -2,6 +2,7 @@
 
     memdsl lint PATH...              lint memory source files
     memdsl map PATH...               compact per-module index of a workspace
+    memdsl catalog PATH...           bounded module navigation pages
     memdsl query PATH... -q TEXT     build an evidence pack for a query
     memdsl check PATH...             preflight a draft against MUST rules
     memdsl explain PATH... ID        show one declaration with relations
@@ -25,8 +26,15 @@ from memdsl.benchmark import (
     run_compliance_benchmark,
 )
 from memdsl.compliance import check_compliance
+from memdsl.compiler import compile_workspace
 from memdsl.linter import has_errors, lint
 from memdsl.model import Workspace
+from memdsl.navigation import (
+    CATALOG_DEFAULT_LIMIT,
+    CATALOG_DEFAULT_MAX_BYTES,
+    CatalogCursorError,
+    build_memory_catalog,
+)
 from memdsl.parser import ParseError
 from memdsl.query import (
     build_evidence_pack,
@@ -105,6 +113,28 @@ def main(argv: List[str] = None) -> int:
         "map", help="compact per-module index of a workspace")
     p_map.add_argument("paths", nargs="+", help=".mem files or directories")
     p_map.add_argument("--json", action="store_true", help="JSON output")
+
+    p_catalog = sub.add_parser(
+        "catalog", help="bounded module/type/subject/status navigation")
+    p_catalog.add_argument("paths", nargs="+", help=".mem files or directories")
+    p_catalog.add_argument("--module", help="restrict to one module")
+    p_catalog.add_argument(
+        "--type", action="append", dest="types",
+        help="restrict to a memory type (repeatable)")
+    p_catalog.add_argument("--subject", help="restrict to a subject symbol")
+    p_catalog.add_argument(
+        "--status", action="append", dest="statuses",
+        help="restrict to a lifecycle status (repeatable)")
+    p_catalog.add_argument("--limit", type=int, default=CATALOG_DEFAULT_LIMIT)
+    p_catalog.add_argument(
+        "--max-bytes", type=int, default=CATALOG_DEFAULT_MAX_BYTES,
+        help="canonical compact UTF-8 JSON byte budget")
+    p_catalog.add_argument("--cursor", help="opaque cursor from a prior page")
+    p_catalog.add_argument("--order", choices=["asc", "desc"], default="asc")
+    p_catalog.add_argument(
+        "--representation", choices=["structured", "text"],
+        help="payload representation (default: structured with --json, else text)")
+    p_catalog.add_argument("--json", action="store_true", help="JSON envelope output")
 
     p_query = sub.add_parser("query", help="query memory into an evidence pack")
     p_query.add_argument("paths", nargs="+", help=".mem files or directories")
@@ -241,6 +271,53 @@ def main(argv: List[str] = None) -> int:
                 indent=2, ensure_ascii=False))
         else:
             print(render_memory_map_text(map_data))
+        return 0
+
+    if args.command == "catalog":
+        ws = _load(args.paths)
+        compiled = compile_workspace(ws, paths=args.paths)
+        representation = args.representation or (
+            "structured" if args.json else "text")
+        try:
+            payload = build_memory_catalog(
+                compiled,
+                module=args.module,
+                types=args.types,
+                subject=args.subject,
+                statuses=args.statuses,
+                limit=args.limit,
+                max_bytes=args.max_bytes,
+                cursor=args.cursor,
+                order=args.order,
+                representation=representation,
+            )
+        except CatalogCursorError as exc:
+            error = {
+                "schema_version": "memdsl.catalog.v1",
+                "status": exc.code,
+                "error": exc.code,
+                "details": [str(exc)],
+            }
+            if args.json:
+                print(json.dumps(error, indent=2, ensure_ascii=False))
+            else:
+                print(str(exc), file=sys.stderr)
+            return 1
+        except ValueError as exc:
+            if args.json:
+                print(json.dumps({
+                    "schema_version": "memdsl.catalog.v1",
+                    "status": "invalid",
+                    "error": "invalid_catalog_request",
+                    "details": [str(exc)],
+                }, indent=2, ensure_ascii=False))
+            else:
+                print(f"invalid catalog request: {exc}", file=sys.stderr)
+            return 2
+        if args.json or representation == "structured":
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            print(payload["rendered_text"])
         return 0
 
     if args.command == "query":

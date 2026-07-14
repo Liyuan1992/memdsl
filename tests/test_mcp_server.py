@@ -7,7 +7,12 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from memdsl.mcp_server import build_mcp_server, inspection_payload, main
+from memdsl.mcp_server import (
+    SERVER_INSTRUCTIONS,
+    build_mcp_server,
+    inspection_payload,
+    main,
+)
 from memdsl.mcp_service import MemdslMCPService, TOOL_NAMES
 
 MEM_SOURCE = """\
@@ -71,9 +76,32 @@ def test_resources_registered(server):
     resources = asyncio.run(server.list_resources())
     uris = {str(r.uri) for r in resources}
     assert "memdsl://status" in uris
+    assert "memdsl://catalog" in uris
     assert "memdsl://map" in uris
     assert "memdsl://types" in uris
     assert "memdsl://files" in uris
+
+
+def test_catalog_tool_schema_and_prompt_recommend_bounded_navigation(server):
+    tools = asyncio.run(server.list_tools())
+    catalog = next(item for item in tools if item.name == "memory_catalog")
+    properties = catalog.inputSchema.get("properties", {})
+    assert {
+        "module", "types", "subject", "statuses", "limit", "max_bytes",
+        "cursor", "order", "representation",
+    } <= set(properties)
+    assert "memory_catalog" in SERVER_INSTRUCTIONS
+    assert "memory_map once at session start" not in SERVER_INSTRUCTIONS
+
+
+def test_call_memory_catalog_and_read_catalog_resource(server):
+    result = asyncio.run(server.call_tool(
+        "memory_catalog", {"limit": 1, "max_bytes": 4096}))
+    text = json.dumps(_as_jsonable(result), ensure_ascii=False, default=str)
+    assert "memdsl.mcp.catalog.v1" in text
+    resource = asyncio.run(server.read_resource("memdsl://catalog"))
+    payload = json.loads(list(resource)[0].content)
+    assert payload["schema_version"] == "memdsl.mcp.catalog.v1"
 
 
 def test_call_memory_propose_stages_only(server, workspace_dir):

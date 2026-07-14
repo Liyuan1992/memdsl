@@ -15,6 +15,10 @@ def test_v06_public_contract_exports():
     assert callable(memdsl.build_memory_map)
     assert callable(memdsl.render_memory_map_text)
     assert callable(memdsl.workspace_vocabulary)
+    # Phase 2 bounded navigation is public without exporting CompiledWorkspace.
+    assert memdsl.CATALOG_SCHEMA == "memdsl.catalog.v1"
+    assert callable(memdsl.build_memory_catalog)
+    assert memdsl.CatalogCursorError is not None
     # 0.6 governed automation and replayable review surfaces
     assert memdsl.POLICY_VERSION == "memdsl.policy.v1"
     assert memdsl.AUTO_APPROVABLE_CAPABILITY == "auto_approvable"

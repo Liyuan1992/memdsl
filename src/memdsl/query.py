@@ -416,12 +416,27 @@ def workspace_vocabulary(ws: WorkspaceInput, limit: int = 50) -> dict:
     types: Dict[str, int] = {}
     for d in active:
         types[d.kind] = types.get(d.kind, 0) + 1
-    return {
+    scopes = sorted({d.scope for d in active if d.scope})
+    modules = sorted({d.module for d in active if d.module})
+    result = {
         "subjects": subjects[:limit],
-        "scopes": sorted({d.scope for d in active if d.scope})[:limit],
-        "modules": sorted({d.module for d in active if d.module})[:limit],
+        "scopes": scopes[:limit],
+        "modules": modules[:limit],
         "types": dict(sorted(types.items())),
     }
+    # Preserve ordinary v1 payload snapshots while making every actual
+    # truncation visible.  Catalog v1 always carries total/truncated fields;
+    # this additive v1 compatibility path emits them only when the old 50-item
+    # slice would otherwise hide vocabulary.
+    for name, values in (
+        ("subjects", subjects),
+        ("scopes", scopes),
+        ("modules", modules),
+    ):
+        if len(values) > limit:
+            result[f"{name}_total"] = len(values)
+            result[f"{name}_truncated"] = True
+    return result
 
 
 def build_memory_map(ws: WorkspaceInput, claim_chars: int = 120) -> dict:

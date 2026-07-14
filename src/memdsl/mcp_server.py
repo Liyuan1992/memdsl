@@ -27,8 +27,8 @@ from memdsl.mcp_service import MemdslMCPService, TOOL_NAMES
 SERVER_NAME = "memdsl"
 SERVER_INSTRUCTIONS = (
     "memdsl serves agent memory written as .mem source files. Call "
-    "memory_map once at session start so you know what memory exists and "
-    "which vocabulary it uses, then call memory_query with the task's key "
+    "memory_catalog at session start for bounded module/type/subject/status "
+    "navigation, then call memory_query with the task's key "
     "nouns and obey the layered contract: MUST items are active hard "
     "constraints, SHOULD items are active guidance, CONTEXT items are active "
     "assertions, and PROVISIONAL items are non-active, unconfirmed candidates "
@@ -36,7 +36,8 @@ SERVER_INSTRUCTIONS = (
     "CONFLICT items must be surfaced to the user, and MISSING items are known "
     "gaps. A no_match result is a retry signal, not "
     "proof of absence: check search_trace for filter exclusions, re-query "
-    "with the returned workspace vocabulary, or browse memory_list and the "
+    "with the returned workspace vocabulary, continue the Catalog cursor, or "
+    "browse memory_list and the "
     "raw memdsl://file/{file_id} sources. Call memory_explain on a "
     "declaration id before citing it as evidence. Before returning or acting "
     "on a consequential draft, call memory_check; BLOCK forbids the draft and "
@@ -71,6 +72,11 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
         """Compact index of serviceable active and provisional lifecycle memory."""
         return _json(svc.memory_map())
 
+    @mcp.resource("memdsl://catalog", mime_type="application/json")
+    def memdsl_catalog() -> str:
+        """Bounded module/type/subject/status navigation Catalog."""
+        return _json(svc.catalog())
+
     @mcp.resource("memdsl://files", mime_type="application/json")
     def memdsl_files() -> str:
         """List .mem source files with their file ids."""
@@ -91,8 +97,33 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
 
     @mcp.tool(name="memory_map")
     def memory_map() -> dict:
-        """Compact index of serviceable active and provisional lifecycle memory. Read once at session start before querying."""
+        """Legacy v1 full Map retained for compatibility; prefer memory_catalog for bounded session-start navigation."""
         return svc.memory_map()
+
+    @mcp.tool(name="memory_catalog")
+    def memory_catalog(
+        module: str = "",
+        types: Optional[List[str]] = None,
+        subject: str = "",
+        statuses: Optional[List[str]] = None,
+        limit: int = 20,
+        max_bytes: int = 8192,
+        cursor: str = "",
+        order: str = "asc",
+        representation: str = "structured",
+    ) -> dict:
+        """Read bounded Catalog pages filtered by module, type, subject, or lifecycle status."""
+        return svc.catalog(
+            module=module or None,
+            types=types,
+            subject=subject or None,
+            statuses=statuses,
+            limit=limit,
+            max_bytes=max_bytes,
+            cursor=cursor or None,
+            order=order,
+            representation=representation,
+        )
 
     @mcp.tool(name="memory_query")
     def memory_query(
@@ -169,8 +200,9 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
     def memdsl_task_brief(task: str = "") -> str:
         """Brief an agent on how to use memdsl memory for a task."""
         return (
-            "Start by calling memory_map so you know what memory exists and "
-            "which vocabulary it uses. Then call memory_query with the "
+            "Start by calling memory_catalog for a bounded view of modules, "
+            "types, subjects, and statuses. Continue next_cursor only with the "
+            "same filters/order/representation. Then call memory_query with the "
             "task's key nouns. Treat MUST items as constraints you enforce "
             "even when they seem irrelevant, SHOULD items as guidance, and "
             "CONTEXT items as active assertions, and PROVISIONAL items as "
@@ -179,7 +211,8 @@ def build_mcp_server(service: Optional[MemdslMCPService] = None, **service_kwarg
             "user instead of resolving them silently, and state MISSING gaps "
             "rather than guessing. If a query returns no_match, do not "
             "conclude the memory is absent: check search_trace for filter "
-            "exclusions, re-query with the returned vocabulary, or browse "
+            "exclusions, re-query with the returned vocabulary, continue or "
+            "refine memory_catalog, or browse "
             "memory_list and the raw sources. Call memory_explain before "
             "citing any declaration. Before returning a consequential draft, "
             "call memory_check and treat NEEDS_REVIEW as unresolved, not "

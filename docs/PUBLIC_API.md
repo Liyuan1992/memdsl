@@ -12,9 +12,11 @@ Import stable entry points from the package root:
 ```python
 from memdsl import (
     AUTO_APPROVABLE_CAPABILITY,
+    CATALOG_SCHEMA,
     EVIDENCE_PACK_SCHEMA,
     POLICY_VERSION,
     AuditLogError,
+    CatalogCursorError,
     CompliancePack,
     Declaration,
     EvidencePack,
@@ -34,6 +36,7 @@ from memdsl import (
     ValidationResult,
     Workspace,
     build_evidence_pack,
+    build_memory_catalog,
     build_memory_map,
     check_compliance,
     declaration_content_hash,
@@ -98,16 +101,55 @@ package-root exports or stable public Python API in this phase.
 ## Navigation path
 
 ```python
+catalog = build_memory_catalog(
+    workspace,
+    module="projects.aurora",
+    types=["decision", "state"],
+    statuses=["active"],
+    limit=20,
+    max_bytes=8192,
+    representation="structured",
+)
+assert catalog["schema_version"] == CATALOG_SCHEMA
+
+while catalog["next_cursor"]:
+    catalog = build_memory_catalog(
+        workspace,
+        module="projects.aurora",
+        types=["decision", "state"],
+        statuses=["active"],
+        limit=20,
+        max_bytes=8192,
+        cursor=catalog["next_cursor"],
+        representation="structured",
+    )
+
 map_data = build_memory_map(workspace)
 text = render_memory_map_text(map_data)
 vocab = workspace_vocabulary(workspace)
 ```
 
+`build_memory_catalog()` is the Phase 2 bounded navigation API. It returns
+module summaries rather than declarations, supports module/type/subject/status
+filters, and enforces both item and canonical compact UTF-8 JSON byte budgets.
+The default is 20 items / 8192 bytes. Use `representation="structured"` for
+`items`, or `representation="text"` for `rendered_text`; the two forms are not
+duplicated in one payload.
+
+Catalog cursors are opaque. Reuse them only with the same filters, order, and
+representation. `CatalogCursorError.code` is `invalid_cursor`,
+`cursor_mismatch`, or `cursor_stale`; stale means the source fingerprint or
+report-only view id changed and pagination must restart. `CompiledWorkspace`,
+`ViewContext`, and `ResolvedView` remain internal even though Catalog payloads
+carry their stable report metadata.
+
 The map is a navigation projection. It includes the shared current service set
 after lifecycle-safe supersede exclusion and makes lifecycle status explicit;
 candidate entries are provisional, not active authority. `workspace_vocabulary`
-uses the same set. Items carry no evidence and claims are truncated, so the map
-is never a citation source.
+uses the same set and now exposes total/truncated metadata when its compatibility
+slice is actually incomplete. Items carry no evidence and claims are truncated,
+so neither Map nor Catalog is a citation source. Map v1 remains available for
+existing clients and is not changed into Catalog.
 
 ## Governed write path
 

@@ -277,7 +277,7 @@ def test_parser_assigns_last_module_to_every_declaration_in_a_file() -> None:
         "module.first_item", "module.second_item"]
 
 
-def test_vocabulary_silently_truncates_at_fifty_subjects() -> None:
+def test_vocabulary_truncates_at_fifty_subjects_with_completeness_metadata() -> None:
     source = "\n".join(
         f'''entity Synthetic.Subject{index:02d} {{
   canonical_name: "Synthetic subject {index:02d}"
@@ -290,14 +290,10 @@ def test_vocabulary_silently_truncates_at_fifty_subjects() -> None:
     vocabulary = workspace_vocabulary(ws)
 
     assert len(vocabulary["subjects"]) == 50
-    assert "subjects_total" not in vocabulary
-    assert "subjects_truncated" not in vocabulary
+    assert vocabulary["subjects_total"] == 51
+    assert vocabulary["subjects_truncated"] is True
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Phase 2: vocabulary truncation must expose completeness metadata",
-)
 def test_vocabulary_truncation_must_be_visible() -> None:
     source = "\n".join(
         f"entity Synthetic.Subject{index:02d} {{ lifecycle {{ status: active }} }}"
