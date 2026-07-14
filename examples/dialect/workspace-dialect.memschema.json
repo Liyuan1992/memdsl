@@ -1,0 +1,16 @@
+{
+  "name": "workspace_dialect",
+  "version": "1",
+  "types": {
+    "mapping": {
+      "runtime_role": "assertion",
+      "required_fields": ["target", "phrases", "evidence"],
+      "optional_fields": ["polarity"],
+      "capabilities": ["dialect_mapping", "requires_evidence"],
+      "defaults": {
+        "polarity": "positive"
+      },
+      "allow_extra_fields": false
+    }
+  }
+}

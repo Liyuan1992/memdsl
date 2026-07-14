@@ -75,8 +75,21 @@ contain `memdsl.json`:
 Schema paths are relative to the manifest. The built-in
 `memdsl.standard@1` type pack is always loaded for backward compatibility.
 Workspace schemas add namespaced domain types to the same `TypeRegistry`.
-`schema_version` is required and must currently be `memdsl.workspace.v1`;
-unsupported manifest versions fail closed.
+`schema_version` is required. `memdsl.workspace.v1` keeps legacy global
+linking. `memdsl.workspace.v2` is an explicit visibility opt-in and requires:
+
+```json
+{
+  "schema_version": "memdsl.workspace.v2",
+  "schemas": [],
+  "linking": {"visibility": "report"}
+}
+```
+
+`linking.visibility` is `report` or `strict`. A v1 manifest that declares
+`linking`, an unsupported version, or unknown v2 linking semantics fails
+closed. This prevents an older runtime from silently ignoring visibility
+rules.
 
 Schema parse errors, missing files, incompatible duplicate type names, and
 invalid runtime roles fail closed before memory files are served.
@@ -92,6 +105,27 @@ use Project.Aurora
 
 Modules group declarations that answer related questions. Sources belong in
 evidence; they should not become one module per chat session or day.
+
+`use X` is document-wide and order-independent. The compiler builds all module
+and symbol indexes before linking. `X` must exactly name either one module or
+one active symbol declaration name. Module imports expose every declaration in
+that module; symbol imports expose only that symbol. Full declaration ids,
+aliases, canonical names, namespace prefixes, and wildcards are not use
+targets. A module/symbol collision or multiple matching symbol occurrences is
+ambiguous and imports nothing.
+
+Use visibility applies to relation targets, subject symbols, and dialect
+mapping targets. Scope strings remain domain-defined opaque applicability
+tokens. In legacy v1, use is retained but global linking is unchanged. In v2
+report mode, a globally resolvable but unimported reference remains linked and
+emits `visibility_violation`. In v2 strict mode it emits an error and does not
+enter compiled relation, subject-alias, or dialect routing. Strict linking does
+not yet imply the Phase 5 declaration/family quarantine envelope.
+
+Workspace v2 permits at most one `module` statement per source file. Report
+mode emits a migration warning while preserving the legacy last-module
+projection; strict mode emits an error and the file's uses do not grant strict
+imports. Workspace v1 retains its existing last-module-wins behavior.
 
 ### 3.3 Schema files
 
@@ -429,6 +463,7 @@ excluded_by_filters_total   total count of filter-hidden matches
 quarantined_matches         permission-safe quarantined matches (empty in report mode)
 vocabulary_suggestions      bounded lexical corrections with source/reason
 retry_queries               deterministic safe retry queries
+dialect_candidate           optional non-writing proposal template
 truncated                   whether a trace sub-list or result limit truncated detail
 ```
 
@@ -450,7 +485,30 @@ alias, or redirect a query automatically. Candidate symbols and declarations
 with a non-empty `access_policy` do not enter this suggestion vocabulary;
 ambiguous suggestions never produce an automatic `retry_query`.
 
-### 7.2 Navigation: bounded Catalog, legacy memory map, and vocabulary
+When exactly one loaded schema type declares the `dialect_mapping` capability
+and a no-match suggestion uniquely identifies a symbol, search trace may add a
+structured `dialect_candidate`. It is an advisory template only. The host must
+add trusted evidence and submit it through the normal proposal/review/approval
+lane; pending mappings never route.
+
+### 7.2 Workspace Dialect
+
+A workspace may define a generic mapping type with the `dialect_mapping`
+capability. The core does not reserve a type name. A mapping uses `target`,
+`phrases`, optional `polarity` (default `positive`), evidence, and lifecycle.
+The fictional example lives under `examples/dialect/`.
+
+Only an active, unrestricted, structurally valid positive mapping whose target
+is one unique active, unrestricted, visible symbol can extend alias routing.
+Candidate, pending, retracted, archived, restricted, invalid, or ambiguous
+mappings do not route and do not enter the new suggestion vocabulary. If a
+phrase maps to multiple symbols, or conflicts with an existing active alias,
+lint reports `ambiguous_dialect_mapping` and the new mapping does not redirect.
+
+Negative mapping precedence is not defined in Phase 4. A non-positive
+`polarity` reports `unsupported_dialect_polarity` and has no routing effect.
+
+### 7.3 Navigation: bounded Catalog, legacy memory map, and vocabulary
 
 Agent-driven reading starts with the bounded Catalog. `build_memory_catalog`
 returns `memdsl.catalog.v1`; CLI `memdsl catalog` uses the same schema and MCP
@@ -495,7 +553,7 @@ workspace vocabulary with aliases. Candidate entries are visibly provisional;
 they are not active authority and their relations cannot hide active entries.
 Map and Catalog are navigation projections, never citation sources.
 
-### 7.3 Deterministic bounded Trace
+### 7.4 Deterministic bounded Trace
 
 `trace_memory()` and CLI `memdsl trace` return `memdsl.trace.v1`; MCP
 `memory_trace` returns `memdsl.mcp.trace.v1`. Trace accepts one or more anchors,

@@ -112,12 +112,22 @@ class RawDeclaration:
     module: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class SourceStatement:
+    """One document-level module/use statement with source location."""
+
+    value: str
+    line: int
+
+
 @dataclass
 class Document:
     module: Optional[str]
     uses: List[str] = field(default_factory=list)
     declarations: List[RawDeclaration] = field(default_factory=list)
     file: str = "<text>"
+    module_statements: List[SourceStatement] = field(default_factory=list)
+    use_statements: List[SourceStatement] = field(default_factory=list)
 
 
 class _Parser:
@@ -154,11 +164,13 @@ class _Parser:
                 if name.kind != "atom":
                     raise ParseError("expected module name", self.file, name.line)
                 doc.module = name.value
+                doc.module_statements.append(SourceStatement(name.value, tok.line))
             elif tok.value == "use":
                 name = self._next()
                 if name.kind != "atom":
                     raise ParseError("expected symbol after 'use'", self.file, name.line)
                 doc.uses.append(name.value)
+                doc.use_statements.append(SourceStatement(name.value, tok.line))
             else:
                 kind = tok.value
                 name_tok = self._next()

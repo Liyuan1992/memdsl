@@ -1,0 +1,20 @@
+# Entirely fictional workspace used to demonstrate a review-gated dialect.
+
+module fictional.projects
+
+entity Fictional.Starboard {
+  canonical_name: "Starboard Workshop"
+  aliases: [starboard]
+  lifecycle { status: active }
+}
+
+fact starboard.release_route {
+  subject: Fictional.Starboard
+  claim: "The fictional Starboard Workshop uses a staged release route."
+  scope: fictional_release
+  lifecycle { status: active }
+  evidence {
+    source: synthetic_project_log
+    quote: "Use a staged release route for the fictional workshop."
+  }
+}

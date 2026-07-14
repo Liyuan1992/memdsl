@@ -1,4 +1,4 @@
-"""Internal deterministic workspace compilation through Phase 3.
+"""Internal deterministic workspace compilation through Phase 4.
 
 This module is deliberately not re-exported from :mod:`memdsl`.  It provides
 the indexed, rebuildable representation used by the existing v0.6 read
@@ -14,13 +14,13 @@ import json
 import os
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple, Union
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from memdsl.lexical import query_terms
 from memdsl.model import Declaration, EXCLUDED_STATUSES, RELATION_FIELDS, Workspace
 
 
-COMPILER_CONTRACT_VERSION = "memdsl.compiler.phase3.v1"
+COMPILER_CONTRACT_VERSION = "memdsl.compiler.phase4.v1"
 
 
 @dataclass(frozen=True)
@@ -87,6 +87,21 @@ class CompiledEdge:
     line: int
     ordinal: int
     candidate_ids: Tuple[str, ...] = ()
+    visibility: str = "legacy"
+
+
+@dataclass(frozen=True)
+class UseResolution:
+    """One deterministic document-level ``use`` resolution."""
+
+    target: str
+    status: str
+    target_kind: str
+    file: str
+    line: int
+    imported_modules: Tuple[str, ...] = ()
+    imported_symbol_ids: Tuple[str, ...] = ()
+    candidate_ids: Tuple[str, ...] = ()
 
 
 DeclarationIndex = Mapping[str, Tuple[Declaration, ...]]
@@ -113,12 +128,19 @@ class CompiledWorkspace:
     lexical_terms: DeclarationIndex
     outgoing: EdgeIndex
     incoming: EdgeIndex
+    uses_by_file: Mapping[str, Tuple[UseResolution, ...]]
+    workspace_schema_version: str
+    linking_visibility: str
+    dialect_mapping_types: Tuple[str, ...]
+    dialect_aliases: Mapping[str, Tuple[str, ...]]
+    dialect_targets: Mapping[str, Tuple[str, ...]]
     diagnostics: Tuple[CompilationDiagnostic, ...]
     revision_cycle_edge_ids: frozenset
     authoritative_supersedes: Tuple[CompiledEdge, ...]
     _legacy_incoming: EdgeIndex = field(repr=False, compare=False)
     _first_by_id: Mapping[str, Declaration] = field(repr=False, compare=False)
     _first_by_name: Mapping[str, Declaration] = field(repr=False, compare=False)
+    _subject_routable: Mapping[int, bool] = field(repr=False, compare=False)
     workspace: Workspace = field(repr=False, compare=False)
 
     @property
@@ -181,6 +203,10 @@ class CompiledWorkspace:
             edge for edge in self._legacy_incoming.get(declaration.id, ())
             if edge.source_id != declaration.id
         )
+
+    def subject_is_routable(self, declaration: Declaration) -> bool:
+        """Whether this declaration's subject may affect strict alias routing."""
+        return self._subject_routable.get(id(declaration), True)
 
 
 WorkspaceInput = Union[Workspace, CompiledWorkspace]
@@ -286,6 +312,37 @@ def compile_workspace(
             )
         return ReferenceResolution(reference, "not_found")
 
+    active_symbols_by_name: Dict[str, List[Declaration]] = {}
+    for declaration in declarations:
+        if (
+            declaration.runtime_role == "symbol"
+            and declaration.status == "active"
+            and declaration.status not in EXCLUDED_STATUSES
+        ):
+            _append(active_symbols_by_name, declaration.name, declaration)
+    (
+        uses_by_file,
+        visibility_by_declaration,
+        link_diagnostics,
+    ) = _compile_use_visibility(
+        workspace=workspace,
+        declarations=declarations,
+        by_module=by_module,
+        active_symbols_by_name=active_symbols_by_name,
+    )
+
+    def visible(source: Declaration, target: Declaration) -> bool:
+        if workspace.linking_visibility == "legacy":
+            return True
+        if source.module == target.module:
+            return True
+        imported_modules, imported_symbols = visibility_by_declaration.get(
+            id(source), (frozenset(), frozenset()))
+        return bool(
+            (target.module or "") in imported_modules
+            or id(target) in imported_symbols
+        )
+
     outgoing: Dict[str, list] = {}
     incoming: Dict[str, list] = {}
     legacy_incoming: Dict[str, list] = {}
@@ -299,6 +356,34 @@ def compile_workspace(
         for relation, targets in declaration.relations().items():
             for target_ref in targets:
                 resolution = resolve(target_ref)
+                visibility = "legacy"
+                edge_status = resolution.status
+                target_id = resolution.target_id
+                candidate_ids = resolution.candidate_ids
+                if resolution.declaration is not None:
+                    is_visible = visible(declaration, resolution.declaration)
+                    visibility = "visible" if is_visible else "violation"
+                    if not is_visible:
+                        severity = (
+                            "error"
+                            if workspace.linking_visibility == "strict"
+                            else "warning"
+                        )
+                        link_diagnostics.append(CompilationDiagnostic(
+                            "visibility_violation",
+                            severity,
+                            f"relation '{relation}' target '{target_ref}' is "
+                            f"outside module '{declaration.module or '(none)'}'; "
+                            "add an exact module or symbol use",
+                            declaration.file,
+                            declaration.line,
+                            declaration.id,
+                            related_ids=(resolution.declaration.id,),
+                        ))
+                        if workspace.linking_visibility == "strict":
+                            edge_status = "visibility_violation"
+                            target_id = None
+                            candidate_ids = (resolution.declaration.id,)
                 edge = CompiledEdge(
                     edge_id=_edge_id(
                         declaration,
@@ -310,12 +395,13 @@ def compile_workspace(
                     source_id=declaration.id,
                     relation=relation,
                     target_ref=target_ref,
-                    target_id=resolution.target_id,
-                    status=resolution.status,
+                    target_id=target_id,
+                    status=edge_status,
                     file=declaration.file,
                     line=declaration.line,
                     ordinal=ordinal,
-                    candidate_ids=resolution.candidate_ids,
+                    candidate_ids=candidate_ids,
+                    visibility=visibility,
                 )
                 _append(outgoing, declaration.id, edge)
                 if edge.target_id is not None:
@@ -326,7 +412,9 @@ def compile_workspace(
                 # every legacy name match even when compiler linking marks the
                 # reference ambiguous.
                 legacy_targets = (
-                    frozen_occurrences.get(target_ref, ())
+                    ()
+                    if edge.status == "visibility_violation"
+                    else frozen_occurrences.get(target_ref, ())
                     if ":" in target_ref
                     else frozen_names.get(target_ref, ())
                 )
@@ -376,6 +464,26 @@ def compile_workspace(
         if _is_active_source(edge, resolved_by_id)
         if edge.edge_id not in authority_cycle_edge_ids
     )
+    subject_routable, subject_diagnostics = _compile_subject_visibility(
+        workspace=workspace,
+        declarations=declarations,
+        active_symbols_by_name=active_symbols_by_name,
+        visible=visible,
+    )
+    link_diagnostics.extend(subject_diagnostics)
+    (
+        dialect_mapping_types,
+        dialect_aliases,
+        dialect_targets,
+        dialect_diagnostics,
+    ) = _compile_dialect_mappings(
+        workspace=workspace,
+        declarations=declarations,
+        active_symbols_by_name=active_symbols_by_name,
+        authoritative_supersedes=authoritative_supersedes,
+        visible=visible,
+    )
+    link_diagnostics.extend(dialect_diagnostics)
     diagnostics = _compile_diagnostics(
         declarations=declarations,
         occurrences_by_id=frozen_occurrences,
@@ -384,6 +492,7 @@ def compile_workspace(
         revision_edges=revision_edges,
         revision_components=revision_components,
         authoritative_supersedes=authoritative_supersedes,
+        additional_diagnostics=tuple(link_diagnostics),
     )
 
     return CompiledWorkspace(
@@ -404,6 +513,12 @@ def compile_workspace(
         lexical_terms=_freeze_declaration_index(lexical_terms),
         outgoing=frozen_outgoing,
         incoming=frozen_incoming,
+        uses_by_file=uses_by_file,
+        workspace_schema_version=workspace.schema_version,
+        linking_visibility=workspace.linking_visibility,
+        dialect_mapping_types=dialect_mapping_types,
+        dialect_aliases=dialect_aliases,
+        dialect_targets=dialect_targets,
         diagnostics=diagnostics,
         revision_cycle_edge_ids=revision_cycle_edge_ids,
         authoritative_supersedes=authoritative_supersedes,
@@ -411,7 +526,408 @@ def compile_workspace(
             legacy_incoming, preserve_input_order=True),
         _first_by_id=MappingProxyType(dict(first_by_id)),
         _first_by_name=MappingProxyType(dict(first_by_name)),
+        _subject_routable=MappingProxyType(dict(subject_routable)),
         workspace=workspace,
+    )
+
+
+def _compile_use_visibility(
+    *,
+    workspace: Workspace,
+    declarations: Tuple[Declaration, ...],
+    by_module: Mapping[str, Sequence[Declaration]],
+    active_symbols_by_name: Mapping[str, Sequence[Declaration]],
+) -> Tuple[
+    Mapping[str, Tuple[UseResolution, ...]],
+    Mapping[int, Tuple[frozenset, frozenset]],
+    List[CompilationDiagnostic],
+]:
+    """Resolve document uses before declaration references are linked."""
+    diagnostics: List[CompilationDiagnostic] = []
+    contexts: Dict[tuple, dict] = {}
+
+    for document in workspace.documents:
+        key = (
+            str(document.file),
+            document.module or "",
+            tuple(document.uses),
+            tuple(statement.value for statement in document.module_statements),
+        )
+        contexts[key] = {
+            "file": str(document.file),
+            "module": document.module or "",
+            "uses": tuple(document.uses),
+            "use_lines": tuple(
+                statement.line for statement in document.use_statements),
+            "module_statements": tuple(document.module_statements),
+        }
+
+    for declaration in declarations:
+        key = (
+            str(declaration.file),
+            declaration.module or "",
+            tuple(declaration.uses),
+            tuple(declaration.module_statements),
+        )
+        contexts.setdefault(key, {
+            "file": str(declaration.file),
+            "module": declaration.module or "",
+            "uses": tuple(declaration.uses),
+            "use_lines": tuple(declaration.line for _ in declaration.uses),
+            "module_statements": tuple(
+                _StatementValue(value, declaration.line)
+                for value in declaration.module_statements
+            ),
+        })
+
+    uses_by_file: Dict[str, List[UseResolution]] = {}
+    context_imports: Dict[tuple, Tuple[frozenset, frozenset]] = {}
+    module_names = {name for name in by_module if name}
+    severity = "error" if workspace.linking_visibility == "strict" else "warning"
+
+    for key, context in sorted(contexts.items(), key=lambda item: item[0]):
+        module_statements = context["module_statements"]
+        invalid_multi_module = len(module_statements) > 1
+        if workspace.linking_visibility != "legacy" and invalid_multi_module:
+            statement = module_statements[1]
+            diagnostics.append(CompilationDiagnostic(
+                "multiple_module_statements",
+                severity,
+                "workspace v2 allows at most one module statement per source "
+                "file; split the file or keep one module declaration",
+                context["file"],
+                statement.line,
+            ))
+
+        imported_modules: Set[str] = set()
+        imported_symbols: Set[int] = set()
+        resolutions: List[UseResolution] = []
+        for index, target in enumerate(context["uses"]):
+            line = (
+                context["use_lines"][index]
+                if index < len(context["use_lines"])
+                else 0
+            )
+            if workspace.linking_visibility == "legacy":
+                resolutions.append(UseResolution(
+                    target=target,
+                    status="recorded",
+                    target_kind="",
+                    file=context["file"],
+                    line=line,
+                ))
+                continue
+
+            module_match = target in module_names
+            symbol_matches = tuple(active_symbols_by_name.get(target, ()))
+            candidate_ids = tuple(sorted(
+                ([f"module:{target}"] if module_match else [])
+                + [item.id for item in symbol_matches]
+            ))
+            if "*" in target:
+                status = "unsupported_wildcard"
+                target_kind = ""
+                diagnostics.append(CompilationDiagnostic(
+                    "unsupported_use_wildcard",
+                    severity,
+                    f"use target '{target}' uses a wildcard; Phase 4 supports "
+                    "only exact module or active symbol names",
+                    context["file"],
+                    line,
+                    related_ids=candidate_ids,
+                ))
+            elif (module_match and symbol_matches) or len(symbol_matches) > 1:
+                status = "ambiguous"
+                target_kind = ""
+                diagnostics.append(CompilationDiagnostic(
+                    "ambiguous_use_target",
+                    severity,
+                    f"use target '{target}' is ambiguous between: "
+                    + ", ".join(candidate_ids),
+                    context["file"],
+                    line,
+                    related_ids=candidate_ids,
+                ))
+            elif module_match:
+                status = "resolved"
+                target_kind = "module"
+                if not (
+                    workspace.linking_visibility == "strict"
+                    and invalid_multi_module
+                ):
+                    imported_modules.add(target)
+            elif len(symbol_matches) == 1:
+                status = "resolved"
+                target_kind = "symbol"
+                if not (
+                    workspace.linking_visibility == "strict"
+                    and invalid_multi_module
+                ):
+                    imported_symbols.add(id(symbol_matches[0]))
+            else:
+                status = "not_found"
+                target_kind = ""
+                diagnostics.append(CompilationDiagnostic(
+                    "unresolved_use_target",
+                    severity,
+                    f"use target '{target}' is not an exact module or active "
+                    "symbol name",
+                    context["file"],
+                    line,
+                ))
+            resolutions.append(UseResolution(
+                target=target,
+                status=status,
+                target_kind=target_kind,
+                file=context["file"],
+                line=line,
+                imported_modules=(
+                    (target,)
+                    if target_kind == "module" and target in imported_modules
+                    else ()
+                ),
+                imported_symbol_ids=(
+                    (symbol_matches[0].id,)
+                    if (
+                        target_kind == "symbol"
+                        and len(symbol_matches) == 1
+                        and id(symbol_matches[0]) in imported_symbols
+                    )
+                    else ()
+                ),
+                candidate_ids=candidate_ids,
+            ))
+        uses_by_file.setdefault(context["file"], []).extend(resolutions)
+        context_imports[key] = (
+            frozenset(imported_modules),
+            frozenset(imported_symbols),
+        )
+
+    visibility_by_declaration = {}
+    for declaration in declarations:
+        key = (
+            str(declaration.file),
+            declaration.module or "",
+            tuple(declaration.uses),
+            tuple(declaration.module_statements),
+        )
+        visibility_by_declaration[id(declaration)] = context_imports.get(
+            key, (frozenset(), frozenset()))
+
+    frozen_uses = MappingProxyType({
+        file: tuple(sorted(items, key=_use_sort_key))
+        for file, items in sorted(uses_by_file.items())
+    })
+    return frozen_uses, visibility_by_declaration, diagnostics
+
+
+@dataclass(frozen=True)
+class _StatementValue:
+    value: str
+    line: int
+
+
+def _compile_subject_visibility(
+    *,
+    workspace: Workspace,
+    declarations: Tuple[Declaration, ...],
+    active_symbols_by_name: Mapping[str, Sequence[Declaration]],
+    visible,
+) -> Tuple[Dict[int, bool], List[CompilationDiagnostic]]:
+    routable: Dict[int, bool] = {}
+    diagnostics: List[CompilationDiagnostic] = []
+    for declaration in declarations:
+        if not declaration.subject or workspace.linking_visibility == "legacy":
+            routable[id(declaration)] = True
+            continue
+        candidates = tuple(active_symbols_by_name.get(declaration.subject, ()))
+        if len(candidates) != 1:
+            routable[id(declaration)] = workspace.linking_visibility != "strict"
+            continue
+        is_visible = visible(declaration, candidates[0])
+        routable[id(declaration)] = (
+            is_visible or workspace.linking_visibility != "strict")
+        if not is_visible:
+            diagnostics.append(CompilationDiagnostic(
+                "visibility_violation",
+                "error" if workspace.linking_visibility == "strict" else "warning",
+                f"subject '{declaration.subject}' is outside module "
+                f"'{declaration.module or '(none)'}'; add an exact symbol use",
+                declaration.file,
+                declaration.line,
+                declaration.id,
+                related_ids=(candidates[0].id,),
+            ))
+    return routable, diagnostics
+
+
+def _compile_dialect_mappings(
+    *,
+    workspace: Workspace,
+    declarations: Tuple[Declaration, ...],
+    active_symbols_by_name: Mapping[str, Sequence[Declaration]],
+    authoritative_supersedes: Tuple[CompiledEdge, ...],
+    visible,
+) -> Tuple[
+    Tuple[str, ...],
+    Mapping[str, Tuple[str, ...]],
+    Mapping[str, Tuple[str, ...]],
+    List[CompilationDiagnostic],
+]:
+    mapping_types = tuple(sorted(
+        descriptor.name
+        for descriptor in workspace.registry.descriptors()
+        if descriptor.has_capability("dialect_mapping")
+    ))
+    diagnostics: List[CompilationDiagnostic] = []
+    if not mapping_types:
+        return (
+            (), MappingProxyType({}), MappingProxyType({}), diagnostics)
+
+    superseded_ids = {
+        edge.target_id for edge in authoritative_supersedes if edge.target_id}
+    id_counts: Dict[str, int] = {}
+    direct_routing: Dict[str, Set[str]] = {}
+    direct_public: Dict[str, Set[str]] = {}
+    for declaration in declarations:
+        id_counts[declaration.id] = id_counts.get(declaration.id, 0) + 1
+        if (
+            declaration.runtime_role != "symbol"
+            or declaration.status != "active"
+            or declaration.status in EXCLUDED_STATUSES
+            or declaration.id in superseded_ids
+        ):
+            continue
+        aliases = declaration.fields.get("aliases")
+        if not isinstance(aliases, list):
+            continue
+        for alias in aliases:
+            phrase = str(alias).strip().lower()
+            if not phrase:
+                continue
+            direct_routing.setdefault(phrase, set()).add(declaration.name)
+            if not declaration.access_policy:
+                direct_public.setdefault(phrase, set()).add(declaration.name)
+
+    mapping_targets: Dict[str, Set[str]] = {}
+    mapping_sources: Dict[str, List[Declaration]] = {}
+    for declaration in declarations:
+        descriptor = declaration.type_descriptor
+        if descriptor is None or not descriptor.has_capability("dialect_mapping"):
+            continue
+        target = declaration.field("target")
+        phrases = declaration.field("phrases")
+        polarity = declaration.field("polarity", "positive")
+        valid_phrases = (
+            isinstance(phrases, list)
+            and bool(phrases)
+            and all(isinstance(item, str) and item.strip() for item in phrases)
+        )
+        if (
+            not isinstance(target, str)
+            or not target.strip()
+            or not valid_phrases
+            or declaration.evidence is None
+        ):
+            diagnostics.append(CompilationDiagnostic(
+                "invalid_dialect_mapping",
+                "error",
+                f"dialect mapping '{declaration.id}' requires a non-empty "
+                "string target, a non-empty list of string phrases, and an "
+                "evidence block",
+                declaration.file,
+                declaration.line,
+                declaration.id,
+            ))
+            continue
+        if polarity != "positive":
+            diagnostics.append(CompilationDiagnostic(
+                "unsupported_dialect_polarity",
+                "error",
+                f"dialect mapping '{declaration.id}' uses unsupported polarity "
+                f"'{polarity}'; Phase 4 supports only positive mappings",
+                declaration.file,
+                declaration.line,
+                declaration.id,
+            ))
+            continue
+        target_name = target.strip()
+        target_candidates = tuple(active_symbols_by_name.get(target_name, ()))
+        if len(target_candidates) != 1:
+            diagnostics.append(CompilationDiagnostic(
+                "invalid_dialect_mapping",
+                "error",
+                f"dialect mapping '{declaration.id}' target '{target_name}' "
+                "must resolve to exactly one active symbol name",
+                declaration.file,
+                declaration.line,
+                declaration.id,
+                related_ids=tuple(sorted(item.id for item in target_candidates)),
+            ))
+            continue
+        target_declaration = target_candidates[0]
+        is_visible = visible(declaration, target_declaration)
+        if workspace.linking_visibility != "legacy" and not is_visible:
+            diagnostics.append(CompilationDiagnostic(
+                "visibility_violation",
+                "error" if workspace.linking_visibility == "strict" else "warning",
+                f"dialect target '{target_name}' is outside module "
+                f"'{declaration.module or '(none)'}'; add an exact symbol use",
+                declaration.file,
+                declaration.line,
+                declaration.id,
+                related_ids=(target_declaration.id,),
+            ))
+        route_allowed = bool(
+            declaration.status == "active"
+            and declaration.status not in EXCLUDED_STATUSES
+            and declaration.id not in superseded_ids
+            and id_counts.get(declaration.id) == 1
+            and not declaration.access_policy
+            and not target_declaration.access_policy
+            and (is_visible or workspace.linking_visibility != "strict")
+        )
+        if not route_allowed:
+            continue
+        for raw_phrase in phrases:
+            phrase = raw_phrase.strip().lower()
+            mapping_targets.setdefault(phrase, set()).add(target_name)
+            mapping_sources.setdefault(phrase, []).append(declaration)
+
+    dialect_aliases: Dict[str, Tuple[str, ...]] = {}
+    dialect_targets: Dict[str, Tuple[str, ...]] = {}
+    for phrase in sorted(mapping_targets):
+        mapped = set(mapping_targets[phrase])
+        routing_targets = mapped | direct_routing.get(phrase, set())
+        public_targets = mapped | direct_public.get(phrase, set())
+        private_conflict = bool(
+            direct_routing.get(phrase, set()) - direct_public.get(phrase, set()))
+        if len(routing_targets) > 1:
+            related = tuple(sorted(routing_targets))
+            for declaration in sorted(
+                mapping_sources[phrase], key=_declaration_sort_key):
+                diagnostics.append(CompilationDiagnostic(
+                    "ambiguous_dialect_mapping",
+                    "warning",
+                    f"dialect phrase '{phrase}' maps to multiple active symbols: "
+                    + ", ".join(related),
+                    declaration.file,
+                    declaration.line,
+                    declaration.id,
+                    related_ids=related,
+                ))
+            if not private_conflict:
+                dialect_targets[phrase] = tuple(sorted(public_targets))
+            continue
+        target_tuple = tuple(sorted(mapped))
+        dialect_aliases[phrase] = target_tuple
+        dialect_targets[phrase] = target_tuple
+
+    return (
+        mapping_types,
+        MappingProxyType(dialect_aliases),
+        MappingProxyType(dialect_targets),
+        diagnostics,
     )
 
 
@@ -424,8 +940,9 @@ def _compile_diagnostics(
     revision_edges: Tuple[CompiledEdge, ...],
     revision_components: Tuple[frozenset, ...],
     authoritative_supersedes: Tuple[CompiledEdge, ...],
+    additional_diagnostics: Tuple[CompilationDiagnostic, ...] = (),
 ) -> Tuple[CompilationDiagnostic, ...]:
-    diagnostics = []
+    diagnostics = list(additional_diagnostics)
 
     for declaration_id, occurrences in occurrences_by_id.items():
         if len(occurrences) < 2:
@@ -483,6 +1000,8 @@ def _compile_diagnostics(
                 edge.source_id,
                 related_ids=tuple(sorted(set(edge.candidate_ids))),
             ))
+        elif edge.status == "visibility_violation":
+            continue
         else:
             diagnostics.append(CompilationDiagnostic(
                 "unresolved_symbol",
@@ -720,6 +1239,8 @@ def _in_memory_workspace_payload(workspace: Workspace) -> dict:
             "kind": declaration.kind,
             "name": declaration.name,
             "module": declaration.module,
+            "uses": list(declaration.uses),
+            "module_statements": list(declaration.module_statements),
             "file": str(declaration.file).replace("\\", "/"),
             "line": declaration.line,
             "fields": _json_safe(declaration.fields),
@@ -737,7 +1258,39 @@ def _in_memory_workspace_payload(workspace: Workspace) -> dict:
         item.pop("source", None)
         descriptors.append(_json_safe(item))
     descriptors.sort(key=lambda item: str(item.get("name", "")))
-    return {"declarations": declarations, "types": descriptors}
+    documents = []
+    declaration_files = {str(item.file) for item in workspace.declarations}
+    for document in workspace.documents:
+        # Declaration-backed document semantics are already represented on
+        # each declaration.  Retain only empty source documents here so a
+        # module/use header awaiting an approved append still affects the
+        # in-memory fingerprint without breaking reversed-declaration parity.
+        if str(document.file) in declaration_files:
+            continue
+        documents.append({
+            "file": str(document.file).replace("\\", "/"),
+            "module": document.module,
+            "module_statements": [
+                {"value": item.value, "line": item.line}
+                for item in document.module_statements
+            ],
+            "uses": [
+                {"value": item.value, "line": item.line}
+                for item in document.use_statements
+            ],
+        })
+    documents.sort(key=lambda item: (
+        item["file"],
+        str(item["module"] or ""),
+        json.dumps(item, ensure_ascii=False, sort_keys=True),
+    ))
+    return {
+        "workspace_schema_version": workspace.schema_version,
+        "linking_visibility": workspace.linking_visibility,
+        "declarations": declarations,
+        "documents": documents,
+        "types": descriptors,
+    }
 
 
 def _source_input_files(
@@ -859,6 +1412,17 @@ def _edge_sort_key(edge: CompiledEdge) -> tuple:
         edge.target_id or edge.target_ref,
         edge.ordinal,
         edge.edge_id,
+    )
+
+
+def _use_sort_key(use: UseResolution) -> tuple:
+    return (
+        os.path.normcase(str(use.file)),
+        str(use.file),
+        use.line,
+        use.target,
+        use.status,
+        use.target_kind,
     )
 
 

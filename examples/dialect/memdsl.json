@@ -1,0 +1,7 @@
+{
+  "schema_version": "memdsl.workspace.v2",
+  "schemas": ["workspace-dialect.memschema.json"],
+  "linking": {
+    "visibility": "report"
+  }
+}

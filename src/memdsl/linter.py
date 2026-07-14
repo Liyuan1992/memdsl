@@ -8,6 +8,14 @@ Implements the v0.5 schema-driven rule set from the spec:
     unknown_relation           error    nested relation key is not registered
     revision_cycle             error    supersedes/revision_of cycle
     supersedes_fork            warning  multiple active successors share a target
+    unresolved_use_target      warning/error exact use target is missing
+    ambiguous_use_target       warning/error module/symbol use collision
+    unsupported_use_wildcard   warning/error Phase 4 use is exact-only
+    visibility_violation       warning/error reference is outside local/use visibility
+    multiple_module_statements warning/error workspace v2 allows one module per file
+    invalid_dialect_mapping    error    dialect target/phrases are structurally invalid
+    ambiguous_dialect_mapping  warning  phrase maps to multiple active symbols
+    unsupported_dialect_polarity error  negative mapping precedence is not frozen
     ambiguous_alias             warning  alias resolves to multiple symbols
     duplicate_declaration_id    error    same id declared twice
     duplicate_declaration       warning  same type+subject+scope+claim

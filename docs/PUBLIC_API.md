@@ -99,12 +99,43 @@ Vocabulary suggestions are lexical hints only. They use active symbols and
 unrestricted vocabulary, never write aliases, never route through candidate
 symbols, and do not auto-retry an ambiguous phrase.
 
+Phase 4 preserves `Document.uses` through `Workspace` and the internal
+compiler. No-manifest and `memdsl.workspace.v1` workspaces keep legacy global
+linking. `memdsl.workspace.v2` explicitly selects `report` or `strict` under
+`linking.visibility`; v1 rejects an in-place `linking` field. Use targets are
+exact module names or exact active symbol declaration names. Module/symbol
+collisions, multiple matching symbols, wildcards, and missing targets fail
+loud without an implicit precedence rule.
+
+Report mode preserves global relation/subject/dialect linking and adds
+diagnostics. Strict mode removes unimported relation edges and subject/dialect
+routing effects, but does not yet implement Phase 5 declaration quarantine.
+`Workspace.schema_version`, `Workspace.linking_visibility`, and MCP status
+additive fields expose the selected source contract; the internal
+`CompiledWorkspace` remains non-public.
+
+Workspace-owned dialect types opt in with the generic `dialect_mapping`
+capability. Only active, unrestricted, valid, unambiguous positive mappings to
+one active, unrestricted, visible symbol extend alias routing. Candidate,
+pending, restricted, ambiguous, and negative mappings do not route. A unique
+no-match suggestion may add a structured `dialect_candidate` template to
+search trace; it never writes Source and still requires evidence plus the
+existing proposal/review/approval lane.
+
 `lint(workspace)` also reports deterministic compiler/link codes:
 `ambiguous_relation_target`, `relation_target_kind_mismatch`,
 `unknown_relation`, `revision_cycle`, and `supersedes_fork`, while dangling
 targets retain the existing `unresolved_symbol` code. Codes are stable; message
 wording is not a parsing contract. `supersedes_fork` is a report-mode warning;
 the other new structural diagnostics are errors.
+
+Phase 4 additionally reports `unresolved_use_target`, `ambiguous_use_target`,
+`unsupported_use_wildcard`, `visibility_violation`,
+`multiple_module_statements`, `invalid_dialect_mapping`,
+`ambiguous_dialect_mapping`, and `unsupported_dialect_polarity`. Use and
+visibility diagnostics are warnings in v2 report mode and errors in strict
+mode where applicable. Ambiguous dialect mappings are warnings but never route;
+invalid or unsupported-polarity mappings are errors.
 
 The internal `memdsl.compiler.CompiledWorkspace` and
 `memdsl.view.ViewContext`/`ResolvedView` types are implementation modules, not
@@ -432,3 +463,8 @@ Collection reads continue to preserve duplicate source occurrences for
 diagnosis. A single-declaration explain request no longer resolves a duplicate
 full id or ambiguous bare name to the first occurrence; CLI/Python text explain
 reports ambiguity and MCP `memory_explain` returns `status: ambiguous`.
+
+Phase 4 does not change the Map, Catalog, EvidencePack, Trace, list, explain,
+check, compliance, proposal, or audit schema ids. Workspace v2 is an explicit
+new Source contract; v1/no-manifest workspaces remain in legacy mode. Strict
+visibility is never inferred from the presence of `use` statements alone.

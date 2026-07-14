@@ -427,6 +427,8 @@ class MemdslMCPService:
             "types": dict(sorted(kinds.items())),
             "registered_types": ws.registry.names(),
             "schema_files": list(ws.registry.schema_files),
+            "workspace_schema_version": compiled.workspace_schema_version,
+            "linking_visibility": compiled.linking_visibility,
             "view": view.metadata(),
             "diagnostic_summary": view.diagnostic_summary(),
             "scopes": sorted(self.scopes),
@@ -588,6 +590,13 @@ class MemdslMCPService:
             next_actions.append(
                 "Retry with suggested workspace vocabulary: "
                 + "; ".join(str(item) for item in retry_queries)
+            )
+        if pack.trace.get("dialect_candidate"):
+            next_actions.append(
+                "A dialect candidate template is available in "
+                "evidence_pack.search_trace.dialect_candidate. Add trusted "
+                "evidence and submit it through memory_propose; pending "
+                "mappings never route."
             )
         payload = {
             "ok": True,

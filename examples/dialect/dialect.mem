@@ -1,0 +1,14 @@
+module fictional.dialect
+
+use Fictional.Starboard
+
+workspace_dialect.mapping starboard.little_workshop {
+  target: Fictional.Starboard
+  phrases: ["the little workshop"]
+  polarity: positive
+  lifecycle { status: active }
+  evidence {
+    source: synthetic_review
+    quote: "In this fictional workspace, 'the little workshop' means Starboard."
+  }
+}

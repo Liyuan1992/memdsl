@@ -25,6 +25,12 @@ UNIVERSAL_FIELDS = frozenset({
 
 WORKSPACE_MANIFEST = "memdsl.json"
 WORKSPACE_SCHEMA_VERSION = "memdsl.workspace.v1"
+WORKSPACE_SCHEMA_VERSION_V2 = "memdsl.workspace.v2"
+WORKSPACE_SCHEMA_VERSIONS = frozenset({
+    WORKSPACE_SCHEMA_VERSION,
+    WORKSPACE_SCHEMA_VERSION_V2,
+})
+LINKING_VISIBILITIES = frozenset({"report", "strict"})
 
 
 class SchemaError(ValueError):
@@ -153,6 +159,9 @@ class TypeRegistry:
     def __init__(self) -> None:
         self._types: Dict[str, TypeDescriptor] = {}
         self.schema_files: List[str] = []
+        self.manifest_files: List[str] = []
+        self.workspace_schema_version = WORKSPACE_SCHEMA_VERSION
+        self.linking_visibility = "legacy"
 
     def register(self, descriptor: TypeDescriptor, *, replace: bool = False) -> None:
         name = str(descriptor.name or "").strip()
@@ -369,7 +378,8 @@ def registry_for_paths(paths: Iterable[str]) -> TypeRegistry:
         manifest = os.path.join(root, WORKSPACE_MANIFEST)
         if os.path.isfile(manifest) and manifest not in manifests:
             manifests.append(manifest)
-    for manifest in manifests:
+    manifest_contract: Optional[Tuple[str, str]] = None
+    for manifest in sorted(manifests):
         try:
             with open(manifest, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
@@ -380,9 +390,45 @@ def registry_for_paths(paths: Iterable[str]) -> TypeRegistry:
         if not isinstance(payload, dict):
             raise SchemaError(f"{manifest}: manifest root must be an object")
         manifest_version = payload.get("schema_version")
-        if manifest_version != WORKSPACE_SCHEMA_VERSION:
+        if manifest_version not in WORKSPACE_SCHEMA_VERSIONS:
             raise SchemaError(
-                f"{manifest}: schema_version must be {WORKSPACE_SCHEMA_VERSION!r}")
+                f"{manifest}: schema_version must be one of "
+                f"{sorted(WORKSPACE_SCHEMA_VERSIONS)!r}")
+        if manifest_version == WORKSPACE_SCHEMA_VERSION:
+            if "linking" in payload:
+                raise SchemaError(
+                    f"{manifest}: memdsl.workspace.v1 cannot declare 'linking'; "
+                    "use memdsl.workspace.v2 for visibility semantics")
+            linking_visibility = "legacy"
+        else:
+            unknown = sorted(
+                set(payload) - {"schema_version", "schemas", "linking"})
+            if unknown:
+                raise SchemaError(
+                    f"{manifest}: memdsl.workspace.v2 has unknown field(s): "
+                    f"{', '.join(unknown)}")
+            linking = payload.get("linking")
+            if not isinstance(linking, dict):
+                raise SchemaError(
+                    f"{manifest}: memdsl.workspace.v2 requires object-valued linking")
+            unknown_linking = sorted(set(linking) - {"visibility"})
+            if unknown_linking:
+                raise SchemaError(
+                    f"{manifest}: linking has unknown field(s): "
+                    f"{', '.join(unknown_linking)}")
+            linking_visibility = linking.get("visibility")
+            if linking_visibility not in LINKING_VISIBILITIES:
+                raise SchemaError(
+                    f"{manifest}: linking.visibility must be 'report' or 'strict'")
+        contract = (manifest_version, linking_visibility)
+        if manifest_contract is not None and manifest_contract != contract:
+            raise SchemaError(
+                f"{manifest}: workspace manifests disagree on schema/linking "
+                f"contract: {manifest_contract!r} vs {contract!r}")
+        manifest_contract = contract
+        registry.workspace_schema_version = manifest_version
+        registry.linking_visibility = linking_visibility
+        registry.manifest_files.append(os.path.abspath(manifest))
         schemas = _strings(payload.get("schemas", []), f"{manifest}.schemas")
         base = os.path.dirname(manifest)
         for schema_path in schemas:

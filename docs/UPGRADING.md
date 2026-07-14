@@ -157,6 +157,54 @@ or review-store migration is required. Map v1, query/list/explain/check v1,
 Catalog Phase 2 cursors/budgets, proposal/review/audit, and pending isolation
 remain compatible.
 
+### Exact `use` visibility and Workspace Dialect (Phase 4 source line)
+
+No-manifest and `memdsl.workspace.v1` workspaces keep legacy global linking.
+The runtime does not infer strictness merely because a file contains `use`.
+To audit imports without changing links, opt in with workspace v2 report mode:
+
+```json
+{
+  "schema_version": "memdsl.workspace.v2",
+  "schemas": [],
+  "linking": {"visibility": "report"}
+}
+```
+
+After fixing every report diagnostic, an owner may explicitly change
+`visibility` to `strict`. A v1 manifest that contains `linking` now fails
+closed; this is intentional because older runtimes would ignore the field.
+Old runtimes already reject the v2 version rather than serving it as v1.
+
+Use is document-wide and two-pass. `use X` imports one exact module or one
+exact active symbol declaration name. It does not accept wildcards, prefixes,
+aliases, canonical names, or full declaration ids. Module/symbol collisions and
+multiple matching symbols import nothing. Module imports expose the module;
+symbol imports expose only the symbol. Use applies to relation targets, subject
+symbols, and dialect targets, not opaque scope strings.
+
+Workspace v2 allows at most one module statement per file. Report mode emits
+`multiple_module_statements` with a split/keep-one migration message; strict
+mode makes it an error and the file's uses do not grant strict imports. V1
+keeps the historical last-module-wins behavior.
+
+Strict mode removes unimported relation edges and subject/dialect routing
+effects. It does not yet quarantine the entire declaration or family; that
+enforcement envelope remains Phase 5. Map/query/list/explain/check/compliance
+v1, Catalog/Trace schemas and budgets, and review/audit behavior are unchanged.
+
+Workspaces may add a schema type with capability `dialect_mapping`. See the
+fictional `examples/dialect/` workspace. Only active, unrestricted, valid,
+unambiguous positive mappings route. Candidate/pending/private/ambiguous
+mappings do not route. Negative precedence is deliberately unavailable and
+returns `unsupported_dialect_polarity`.
+
+A unique no-match suggestion may add `search_trace.dialect_candidate`. It is a
+structured template, not a write. Add trusted evidence and submit it through
+the existing proposal/review/approval path. Pending mappings remain invisible;
+approval only activates routing after the declaration is appended to Source
+with the correct module/use context and the workspace recompiles.
+
 ### MCP propose payload
 
 `memory_propose` now returns `memdsl.mcp.propose.v2`. Successful payloads

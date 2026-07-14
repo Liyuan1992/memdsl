@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from memdsl.parser import Document, RawDeclaration, parse_file
-from memdsl.schema import TypeDescriptor, TypeRegistry, registry_for_paths
+from memdsl.schema import (
+    WORKSPACE_SCHEMA_VERSION,
+    TypeDescriptor,
+    TypeRegistry,
+    registry_for_paths,
+)
 
 #: Relation field names recognized inside a `relations { ... }` block
 #: or as top-level fields.
@@ -28,6 +33,8 @@ class Declaration:
     file: str
     line: int
     module: Optional[str] = None
+    uses: Tuple[str, ...] = ()
+    module_statements: Tuple[str, ...] = ()
     type_descriptor: Optional[TypeDescriptor] = field(default=None, repr=False)
 
     @property
@@ -159,6 +166,9 @@ class Workspace:
     declarations: List[Declaration] = field(default_factory=list)
     files: List[str] = field(default_factory=list)
     registry: TypeRegistry = field(default_factory=TypeRegistry.standard, repr=False)
+    documents: List[Document] = field(default_factory=list, repr=False)
+    schema_version: str = WORKSPACE_SCHEMA_VERSION
+    linking_visibility: str = "legacy"
 
     # ---- construction ----
 
@@ -181,7 +191,12 @@ class Workspace:
                 item,
             ),
         )
-        ws = cls(registry=registry or registry_for_paths(path_list))
+        resolved_registry = registry or registry_for_paths(path_list)
+        ws = cls(
+            registry=resolved_registry,
+            schema_version=resolved_registry.workspace_schema_version,
+            linking_visibility=resolved_registry.linking_visibility,
+        )
         for path in path_list:
             if os.path.isdir(path):
                 for root, dirs, names in os.walk(path):
@@ -194,11 +209,16 @@ class Workspace:
         return ws
 
     def add_document(self, doc: Document) -> None:
+        self.documents.append(doc)
         self.files.append(doc.file)
+        module_statements = tuple(
+            statement.value for statement in doc.module_statements)
         for raw in doc.declarations:
             self.declarations.append(
                 Declaration(kind=raw.kind, name=raw.name, fields=raw.fields,
                             file=raw.file, line=raw.line, module=raw.module,
+                            uses=tuple(doc.uses),
+                            module_statements=module_statements,
                             type_descriptor=self.registry.resolve(raw.kind))
             )
 

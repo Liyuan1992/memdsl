@@ -9,6 +9,7 @@ embeddings, or both) behind the same contract.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from difflib import SequenceMatcher
 from dataclasses import dataclass, field
@@ -169,15 +170,20 @@ class EvidencePack:
         return json.dumps(self.as_dict(), indent=2, ensure_ascii=False)
 
 
-def _score(decl: Declaration, query_terms: List[str],
-           subject_hits: List[str]) -> ScoredDeclaration:
+def _score(
+    decl: Declaration,
+    query_terms: List[str],
+    subject_hits: List[str],
+    *,
+    subject_routable: bool = True,
+) -> ScoredDeclaration:
     hay = decl.searchable_text()
     hay_terms = set(_terms(hay))
     # Preserve query order while de-duplicating terms.  Iterating a set here
     # made the serialized matched_terms order depend on Python's hash seed.
     matched = [t for t in dict.fromkeys(query_terms) if t in hay_terms]
     score = float(len(matched))
-    if decl.subject and decl.subject in subject_hits:
+    if subject_routable and decl.subject and decl.subject in subject_hits:
         score += 2.0
         matched.append(f"subject:{decl.subject}")
     if score > 0 and str(decl.confidence or "") == "high":
@@ -211,6 +217,13 @@ def _active_alias_map(ws: WorkspaceInput) -> Dict[str, List[str]]:
             if id(decl) not in current_objects or decl.status != "active":
                 continue
             amap.setdefault(alias, []).append(decl.name)
+    for phrase, targets in compiled.dialect_aliases.items():
+        existing = set(amap.get(phrase, ()))
+        if existing and existing != set(targets):
+            continue
+        amap.setdefault(phrase, []).extend(targets)
+    for phrase in list(amap):
+        amap[phrase] = sorted(set(amap[phrase]))
     return amap
 
 
@@ -291,13 +304,27 @@ def _build_evidence_pack(
     candidates = [
         d for d in pool
         if (type_filter is None or d.kind in type_filter)
-        and (subject is None or d.subject == subject)
+        and (
+            subject is None
+            or (
+                d.subject == subject
+                and compiled.subject_is_routable(d)
+            )
+        )
     ]
 
     indexed_pool = _indexed_candidate_pool(
         compiled, current_objects, query_terms, subject_hits)
     score_pool = pool if candidate_mode == "legacy" else indexed_pool
-    all_scored = [_score(d, query_terms, subject_hits) for d in score_pool]
+    all_scored = [
+        _score(
+            d,
+            query_terms,
+            subject_hits,
+            subject_routable=compiled.subject_is_routable(d),
+        )
+        for d in score_pool
+    ]
     all_positive = [item for item in all_scored if item.score > 0]
     candidate_objects = {id(item) for item in candidates}
     scored = [
@@ -339,7 +366,11 @@ def _build_evidence_pack(
     # a shared subject or scope and thereby activate an authoritative MUST.
     hit_ids = {s.declaration.id for s in active_hits}
     hit_subjects = {
-        s.declaration.subject for s in active_hits if s.declaration.subject}
+        s.declaration.subject
+        for s in active_hits
+        if s.declaration.subject
+        if compiled.subject_is_routable(s.declaration)
+    }
     hit_scopes = {
         s.declaration.scope for s in active_hits if s.declaration.scope}
 
@@ -351,7 +382,10 @@ def _build_evidence_pack(
         relevant = (
             d.id in hit_ids
             or d.scope in hit_scopes
-            or d.subject in hit_subjects
+            or (
+                compiled.subject_is_routable(d)
+                and d.subject in hit_subjects
+            )
             or d.scope == "global"
         )
         if relevant:
@@ -424,6 +458,8 @@ def _build_evidence_pack(
                 query,
             )
         )
+    dialect_candidate = _dialect_candidate(
+        compiled, vocabulary_suggestions) if not has_active_hits else None
     indexes_used = [
         "legacy_scan" if candidate_mode == "legacy" else "lexical_terms",
         "active_aliases",
@@ -468,6 +504,8 @@ def _build_evidence_pack(
             or suggestions_truncated
         ),
     }
+    if dialect_candidate is not None:
+        pack.trace["dialect_candidate"] = dialect_candidate
 
     return pack
 
@@ -487,7 +525,8 @@ def _indexed_candidate_pool(
         for declaration in compiled.by_subject.get(subject, ()):
             if (id(declaration) in current_objects
                     and declaration.runtime_role != "symbol"
-                    and declaration.has_capability("searchable")):
+                    and declaration.has_capability("searchable")
+                    and compiled.subject_is_routable(declaration)):
                 selected[id(declaration)] = declaration
     return [
         declaration for declaration in compiled.searchable_declarations
@@ -544,9 +583,12 @@ def _vocabulary_suggestions(
         "symbol": 0,
         "alias": 1,
         "canonical_name": 2,
-        "module": 3,
-        "type": 4,
+        "dialect": 3,
+        "module": 4,
+        "type": 5,
     }
+    for phrase, symbols in compiled.dialect_targets.items():
+        vocabulary.setdefault((phrase, "dialect"), set()).update(symbols)
     for query_term in dict.fromkeys(terms):
         for (phrase, category), raw_symbols in vocabulary.items():
             if query_term == phrase or not phrase:
@@ -605,6 +647,43 @@ def _vocabulary_suggestions(
             retry_queries.append(retry)
     retry_queries = list(dict.fromkeys(retry_queries))[:limit]
     return suggestions, retry_queries, len(ranked) > len(suggestions)
+
+
+def _dialect_candidate(compiled, suggestions: Sequence[dict]) -> Optional[dict]:
+    """Return an advisory, non-writing proposal template for one safe retry."""
+    if len(compiled.dialect_mapping_types) != 1:
+        return None
+    suggestion = next((
+        item for item in suggestions
+        if not item.get("ambiguous") and len(item.get("symbols", ())) == 1
+    ), None)
+    if suggestion is None:
+        return None
+    phrase = str(suggestion["query_term"])
+    target = str(suggestion["symbols"][0])
+    slug = "_".join(query_terms(phrase)) or "phrase"
+    digest = hashlib.sha256(
+        f"{phrase}\0{target}".encode("utf-8")).hexdigest()[:10]
+    return {
+        "status": "proposal_required",
+        "mapping_type": compiled.dialect_mapping_types[0],
+        "phrase": phrase,
+        "target": target,
+        "name_hint": f"dialect.{slug}.{digest}",
+        "fields": {
+            "target": target,
+            "phrases": [phrase],
+            "polarity": "positive",
+            "lifecycle": {"status": "active"},
+        },
+        "requires_evidence": True,
+        "requires_review": True,
+        "boundary": (
+            "This is an advisory template only. The query did not write Source; "
+            "a host must add trusted evidence and submit it through the existing "
+            "proposal/review/approval lane. Pending mappings never route."
+        ),
+    }
 
 
 def _suggestion_score(query_term: str, phrase: str) -> Tuple[float, str]:
