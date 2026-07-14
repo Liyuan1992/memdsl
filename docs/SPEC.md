@@ -5,6 +5,10 @@ Status: reference specification for the `memdsl` v0.8 implementation
 Release date: 2026-07-14
 License: [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
 
+The frozen 0.8 contract below remains normative for v1/v2 workspaces.
+`0.9.0.dev0` adds the explicitly opt-in experimental contract in
+[Section 14](#14-experimental-phase-6-first-class-explicit-edges).
+
 ## 1. Core thesis
 
 Memory DSL is an LLM-first, declarative source language for governed
@@ -945,5 +949,70 @@ constraint recall, citation accuracy, and per-case results. The v0.4
   behavioral authority; its relations cannot remove active authority either.
 - Automation requires independently attested identity and evidence; proposal
   content cannot attest to itself.
-- Source declarations and append-only review history are authoritative.
+- Source declarations are authoritative for current runtime behavior. Append-
+  only review history is authoritative only as an audit record. It is not an input
+  to `CompiledWorkspace`, `ResolvedView`, graph authority, or access authorization.
   Corrections supersede prior declarations instead of silently rewriting them.
+
+## 14. Experimental Phase 6 first-class explicit Edges
+
+Phase 6 is available only in `0.9.0.dev0` with
+`memdsl.workspace.v3` and
+`features.explicit_edges="experimental-v1"`. An old 0.8 runtime rejects the
+unknown manifest version before loading Edge syntax; the 0.9 runtime rejects
+Edge records in v1/v2.
+
+An Edge is a reserved core record, not a workspace memory type. Its stable
+canonical id is `relation_edge:<name>` and is independent of file, line,
+ordinal, order, and hash seed. `explicit_edge` is an authoring alias.
+
+Required record fields are exact full ids `declared_by`, `source`, and
+`target`; a registered `relation`; an evidence block with source/quote; and a
+lifecycle. The record E owns lifecycle/access/evidence while A/B are graph
+endpoints. Compiled representations MUST keep `record_id`, `declared_by_id`,
+`source_id`, and `target_id` separate.
+
+The built-in relation registry is exactly `supports`, `depends_on`,
+`supersedes`, and `contradicts`. Workspace schemas MAY register namespaced
+extension relations with explicit stability. `refines` is not a validated
+built-in and MUST remain an experimental extension when used.
+All four built-in descriptors remain `stability: experimental` during Phase 6;
+"built-in" means a public default vocabulary, not empirically validated truth.
+
+Only active, resolved Edge records with active endpoints enter the
+authoritative graph. Before any operational count, filter, diagnostic,
+incoming/outgoing explanation, or traversal:
+
+```text
+readable(edge record) AND readable(source endpoint) AND readable(target endpoint)
+```
+
+Pending proposals and inactive/private/quarantined/disputed/retracted/
+superseded Edge records are not serviceable. Lifecycle events are append-only
+`relation_edge_event` records with `confirm | dispute | retract | supersede`;
+they do not edit endpoint declarations.
+
+Every Edge/event proposal has an immutable human-review floor. The unified
+reserved-capability set is `relation_edge`, `explicit_edge`,
+`relation_edge_event`, `explicit_edge_event`, and `edge_lifecycle`; any one of
+them requires the human queue. Schemas cannot combine any reserved capability
+with `auto_approvable`, and policy rules cannot auto-route reserved Edge kinds.
+Human approval MUST reparse/compile/lint in the actual dedicated `edges.mem` or
+`*.edges.mem` target context.
+
+Legacy node relations remain supported. A duplicate legacy/explicit triple is
+traversed once while retaining all origin ids. Legacy `supersedes` keeps 0.8
+declaration-exclusion precedence; explicit `supersedes` is graph-only in Phase
+6 and cannot weaken MUST/BLOCK. Migration never rewrites approved history.
+
+MCP reuses the existing 11 tools: `memory_propose`, `memory_list`,
+`memory_explain`, and `memory_trace`. No new Edge MCP scope or tool is part of
+the contract.
+
+Authority limitation: Source remains the runtime authority. Review/audit state
+does not participate in `CompiledWorkspace`, `ResolvedView`, graph authority,
+or access authorization, and direct active Source writes can bypass proposal
+review. Phase 6 is only a **Source-authority + review-gated workflow contract**,
+not a digest-bound grant, authority ledger, proof object, or non-bypassable
+reviewed authorization guarantee. The normative risks and rollback rules are
+in [DESIGN_explicit_edges_phase6.md](DESIGN_explicit_edges_phase6.md).

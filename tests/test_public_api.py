@@ -1,8 +1,8 @@
 import memdsl
 
 
-def test_v08_public_contract_exports():
-    assert memdsl.__version__ == "0.8.0"
+def test_v09_experimental_public_contract_preserves_v08_exports():
+    assert memdsl.__version__ == "0.9.0.dev0"
     assert memdsl.EVIDENCE_PACK_SCHEMA == "memdsl.evidence_pack.v1"
     assert memdsl.Workspace is not None
     assert memdsl.Declaration is not None
@@ -62,3 +62,12 @@ def test_v08_public_contract_exports():
     assert callable(memdsl.record_post_review)
     assert callable(memdsl.review_digest)
     assert callable(memdsl.review_stats)
+    # Phase 6 is an additive experimental line; 0.8 contracts above stay exact.
+    assert memdsl.ExplicitEdge is not None
+    assert memdsl.EdgeLifecycleEvent is not None
+    assert memdsl.EdgeRelationDescriptor is not None
+    assert memdsl.EDGE_CATALOG_SCHEMA == "memdsl.explicit_edges.experimental.v1"
+    assert callable(memdsl.build_explicit_edge_catalog)
+    assert callable(memdsl.explain_explicit_edge)
+    assert callable(memdsl.build_edge_transition_source)
+    assert callable(memdsl.confirm_edge_proposal)

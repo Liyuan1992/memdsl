@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "memdsl"
-version = "0.8.0"
+version = "0.9.0.dev0"
 description = "Schema-extensible agent memory as lintable, queryable source code"
 readme = "README.md"
 license = { text = "MIT" }
@@ -39,6 +39,10 @@ packages = ["src/memdsl"]
 "LICENSE" = "share/doc/memdsl/LICENSE"
 "docs/DOCUMENTATION_INDEX.md" = "share/doc/memdsl/DOCUMENTATION_INDEX.md"
 "docs/DESIGN_memory_source_compiled_view.md" = "share/doc/memdsl/DESIGN_memory_source_compiled_view.md"
+"docs/DESIGN_explicit_edges_phase6.md" = "share/doc/memdsl/DESIGN_explicit_edges_phase6.md"
+"docs/PUBLIC_API.md" = "share/doc/memdsl/PUBLIC_API.md"
+"docs/SPEC.md" = "share/doc/memdsl/SPEC.md"
+"docs/UPGRADING.md" = "share/doc/memdsl/UPGRADING.md"
 "docs/PAPER_LICENSE.md" = "share/doc/memdsl/PAPER_LICENSE.md"
 "docs/PAPER_publication_readiness_audit.md" = "share/doc/memdsl/PAPER_publication_readiness_audit.md"
 "docs/PAPER_related_work_claim_ledger.md" = "share/doc/memdsl/PAPER_related_work_claim_ledger.md"

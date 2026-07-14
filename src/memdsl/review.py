@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Mapping, Optional, Sequence
 
 from memdsl.linter import lint
-from memdsl.model import Declaration, Workspace
+from memdsl.model import ReviewableSource, Workspace
 from memdsl.parser import ParseError, parse_text
 from memdsl.policy import (
     EvidenceVerification,
@@ -44,8 +44,10 @@ from memdsl.policy import (
     RoutingAssessment,
     RoutingDecision,
     declaration_content_hash,
+    requires_human_edge_review,
     verify_workspace_file_quote,
 )
+from memdsl.schema import RESERVED_EDGE_KINDS
 
 PROPOSAL_SUFFIX = ".mem.proposal"
 PROPOSAL_FILE_MARKER = "<proposal>"
@@ -108,9 +110,20 @@ class Proposal:
         head = ""
         try:
             doc = parse_text(self.source, file=PROPOSAL_FILE_MARKER)
-            if doc.declarations:
-                d = doc.declarations[0]
-                head = f"{d.kind}:{d.name}"
+            items = (
+                list(doc.declarations)
+                + list(doc.explicit_edges)
+                + list(doc.edge_events)
+            )
+            if items:
+                item = items[0]
+                head = (
+                    f"relation_edge:{item.name}"
+                    if item.kind in {"relation_edge", "explicit_edge"}
+                    else f"relation_edge_event:{item.name}"
+                    if item.kind in {"relation_edge_event", "explicit_edge_event"}
+                    else f"{item.kind}:{item.name}"
+                )
         except ParseError:
             head = "(unparseable)"
         return {
@@ -133,7 +146,7 @@ class ValidationResult:
     errors: List[dict] = field(default_factory=list)
     warnings: List[dict] = field(default_factory=list)
     declaration_id: str = ""
-    declaration: Optional[Declaration] = field(default=None, repr=False)
+    declaration: Optional[ReviewableSource] = field(default=None, repr=False)
 
 
 def staging_dir_for(workspace_paths: Sequence[str], staging: Optional[str] = None) -> str:
@@ -222,23 +235,38 @@ class ReviewStore:
             doc = parse_text(text, file=PROPOSAL_FILE_MARKER)
         except ParseError as exc:
             return ValidationResult(False, errors=[_diag("parse_error", str(exc))])
-        if len(doc.declarations) != 1:
+        source_items = (
+            list(doc.declarations)
+            + list(doc.explicit_edges)
+            + list(doc.edge_events)
+        )
+        if len(source_items) != 1:
             return ValidationResult(False, errors=[_diag(
                 "single_declaration_required",
-                f"a proposal must contain exactly one declaration, got {len(doc.declarations)}",
+                f"a proposal must contain exactly one declaration or explicit Edge "
+                f"item, got {len(source_items)}",
             )])
 
         merged = Workspace(
             declarations=list(ws.declarations),
+            explicit_edges=list(ws.explicit_edges),
+            edge_events=list(ws.edge_events),
             files=list(ws.files),
             registry=ws.registry,
             documents=list(ws.documents),
             schema_version=ws.schema_version,
             linking_visibility=ws.linking_visibility,
             enforcement_mode=ws.enforcement_mode,
+            explicit_edges_enabled=ws.explicit_edges_enabled,
         )
         merged.add_document(doc)
-        decl = merged.declarations[-1]
+        item = (
+            merged.declarations[-1]
+            if doc.declarations else
+            merged.explicit_edges[-1]
+            if doc.explicit_edges else
+            merged.edge_events[-1]
+        )
 
         errors: List[dict] = []
         warnings: List[dict] = []
@@ -251,8 +279,84 @@ class ReviewStore:
             not errors,
             errors=errors,
             warnings=warnings,
-            declaration_id=decl.id,
-            declaration=decl,
+            declaration_id=item.id,
+            declaration=item,
+        )
+
+    def validate_for_target(
+        self, ws: Workspace, source: str, target_path: str,
+    ) -> ValidationResult:
+        """Re-parse an Edge proposal in its final dedicated file context."""
+        preliminary = self.validate(ws, source)
+        if not preliminary.ok or preliminary.declaration is None:
+            return preliminary
+        if preliminary.declaration.kind not in RESERVED_EDGE_KINDS:
+            return ValidationResult(False, errors=[_diag(
+                "edge_target_context_requires_edge",
+                "target-context approval is reserved for explicit Edge items",
+            )])
+        basename = os.path.basename(os.path.abspath(target_path)).lower()
+        if basename != "edges.mem" and not basename.endswith(".edges.mem"):
+            return ValidationResult(False, errors=[_diag(
+                "dedicated_edge_file_required",
+                "explicit Edge approval target must be edges.mem or *.edges.mem",
+            )])
+        current = _read_text(target_path)
+        combined = current.rstrip("\n")
+        if combined:
+            combined += "\n"
+        combined += str(source).strip() + "\n"
+        try:
+            document = parse_text(combined, file=os.path.abspath(target_path))
+        except ParseError as exc:
+            return ValidationResult(False, errors=[_diag("parse_error", str(exc))])
+        if document.declarations:
+            return ValidationResult(False, errors=[_diag(
+                "edge_target_not_dedicated",
+                "dedicated Edge files may contain module/use plus explicit Edge "
+                "records/events, not ordinary declarations",
+            )])
+        merged = Workspace(
+            declarations=[item for item in ws.declarations
+                          if os.path.abspath(item.file) != os.path.abspath(target_path)],
+            explicit_edges=[item for item in ws.explicit_edges
+                            if os.path.abspath(item.file) != os.path.abspath(target_path)],
+            edge_events=[item for item in ws.edge_events
+                         if os.path.abspath(item.file) != os.path.abspath(target_path)],
+            files=[path for path in ws.files
+                   if os.path.abspath(path) != os.path.abspath(target_path)],
+            registry=ws.registry,
+            documents=[item for item in ws.documents
+                       if os.path.abspath(item.file) != os.path.abspath(target_path)],
+            schema_version=ws.schema_version,
+            linking_visibility=ws.linking_visibility,
+            enforcement_mode=ws.enforcement_mode,
+            explicit_edges_enabled=ws.explicit_edges_enabled,
+        )
+        merged.add_document(document)
+        item = (
+            merged.explicit_edges[-1]
+            if preliminary.declaration.kind == "relation_edge"
+            else merged.edge_events[-1]
+        )
+        errors: List[dict] = []
+        warnings: List[dict] = []
+        for diagnostic in lint(merged):
+            if os.path.abspath(diagnostic.file) != os.path.abspath(target_path):
+                continue
+            entry = {
+                "code": diagnostic.code,
+                "severity": diagnostic.severity,
+                "message": diagnostic.message,
+                "line": diagnostic.line,
+            }
+            (errors if diagnostic.severity == "error" else warnings).append(entry)
+        return ValidationResult(
+            not errors,
+            errors=errors,
+            warnings=warnings,
+            declaration_id=item.id,
+            declaration=item,
         )
 
     # ---- queue operations ----
@@ -567,7 +671,7 @@ class ReviewStore:
     def _record_no_policy_duplicate_locked(
         self,
         duplicate: Mapping[str, object],
-        declaration: Declaration,
+        declaration: ReviewableSource,
         *,
         client: str,
         reason: str,
@@ -638,7 +742,7 @@ class ReviewStore:
     ) -> Optional[dict]:
         workspace_has_content = any(
             declaration_content_hash(declaration) == content_hash
-            for declaration in ws.declarations)
+            for declaration in ws.reviewable_sources())
         for proposal in self.list(status="all"):
             if proposal.status not in ("pending", "approved"):
                 continue
@@ -657,7 +761,7 @@ class ReviewStore:
         # A declaration may have been written directly or imported before the
         # review store existed.  Exact normalized content is still an
         # idempotent no-op, even though there is no proposal file to reference.
-        for declaration in ws.declarations:
+        for declaration in ws.reviewable_sources():
             if declaration_content_hash(declaration) == content_hash:
                 return {
                     "proposal_id": "",
@@ -694,7 +798,7 @@ class ReviewStore:
     def _handle_policy_duplicate_locked(
         self,
         duplicate: Mapping[str, object],
-        declaration: Declaration,
+        declaration: ReviewableSource,
         *,
         policy: ReviewPolicy,
         context: Optional[ProposalContext],
@@ -719,7 +823,7 @@ class ReviewStore:
     def _downgrade_routed_duplicate_locked(
         self,
         duplicate: Mapping[str, object],
-        declaration: Declaration,
+        declaration: ReviewableSource,
         *,
         policy: ReviewPolicy,
     ) -> dict:
@@ -776,7 +880,7 @@ class ReviewStore:
     def _record_duplicate_locked(
         self,
         duplicate: Mapping[str, object],
-        declaration: Declaration,
+        declaration: ReviewableSource,
         *,
         policy: ReviewPolicy,
         context: Optional[ProposalContext],
@@ -808,7 +912,7 @@ class ReviewStore:
     def _write_duplicate_audit_locked(
         self,
         duplicate: Mapping[str, object],
-        declaration: Declaration,
+        declaration: ReviewableSource,
         *,
         assessment: RoutingAssessment,
         client: str,
@@ -980,6 +1084,7 @@ class ReviewStore:
         automatic_daily_limit: Optional[int] = None,
         expected_evidence_verification: Optional[EvidenceVerification] = None,
         evidence_verifier: Optional[EvidenceVerifier] = verify_workspace_file_quote,
+        target_context: bool = False,
     ) -> dict:
         extra = _validated_audit_extra(
             audit_extra, reserved=APPROVE_AUDIT_RESERVED)
@@ -1013,6 +1118,8 @@ class ReviewStore:
                 "expected_evidence_verification must be EvidenceVerification")
         if evidence_verifier is not None and not callable(evidence_verifier):
             raise TypeError("evidence_verifier must be callable or None")
+        if not isinstance(target_context, bool):
+            raise TypeError("target_context must be a boolean")
         into_path = os.path.abspath(into)
         with _exclusive_file_lock(self.lock_path):
             proposal = self.get(proposal_id)
@@ -1021,6 +1128,20 @@ class ReviewStore:
             if proposal.status != "pending":
                 return {"ok": False, "status": f"already_{proposal.status}",
                         "proposal_id": proposal.id}
+            proposed_item = _declaration_for_source(ws, proposal.source)
+            if (
+                proposed_item is not None
+                and proposed_item.kind in RESERVED_EDGE_KINDS
+                and not target_context
+            ):
+                return {
+                    "ok": False,
+                    "status": "edge_target_context_required",
+                    "proposal_id": proposal.id,
+                    "hint": (
+                        "use the explicit Edge confirmation API/CLI so the "
+                        "proposal is recompiled in edges.mem or *.edges.mem"),
+                }
 
             prior = self._decision(proposal.id)
             if prior and prior.get("action") == "reject":
@@ -1131,7 +1252,11 @@ class ReviewStore:
             else:
                 # Re-validate against the *current* workspace: it may have
                 # changed since the proposal was staged.
-                result = self.validate(ws, proposal.source)
+                result = (
+                    self.validate_for_target(ws, proposal.source, into_path)
+                    if target_context else
+                    self.validate(ws, proposal.source)
+                )
                 if not result.ok and not force:
                     return {
                         "ok": False,
@@ -1397,29 +1522,41 @@ def _declaration_id(source: str) -> str:
         doc = parse_text(source, file=PROPOSAL_FILE_MARKER)
     except ParseError:
         return ""
-    if not doc.declarations:
+    items = (
+        list(doc.declarations) + list(doc.explicit_edges) + list(doc.edge_events)
+    )
+    if not items:
         return ""
-    decl = doc.declarations[0]
-    return f"{decl.kind}:{decl.name}"
+    item = items[0]
+    if item.kind in {"relation_edge", "explicit_edge"}:
+        return f"relation_edge:{item.name}"
+    if item.kind in {"relation_edge_event", "explicit_edge_event"}:
+        return f"relation_edge_event:{item.name}"
+    return f"{item.kind}:{item.name}"
 
 
-def _declaration_for_source(ws: Workspace, source: str) -> Optional[Declaration]:
+def _declaration_for_source(
+    ws: Workspace, source: str,
+) -> Optional[ReviewableSource]:
     try:
         doc = parse_text(str(source or "").strip(), file=PROPOSAL_FILE_MARKER)
     except ParseError:
         return None
-    if len(doc.declarations) != 1:
-        return None
-    raw = doc.declarations[0]
-    return Declaration(
-        kind=raw.kind,
-        name=raw.name,
-        fields=raw.fields,
-        file=raw.file,
-        line=raw.line,
-        module=raw.module,
-        type_descriptor=ws.registry.resolve(raw.kind),
+    items = (
+        list(doc.declarations) + list(doc.explicit_edges) + list(doc.edge_events)
     )
+    if len(items) != 1:
+        return None
+    probe = Workspace(
+        registry=ws.registry,
+        schema_version=ws.schema_version,
+        linking_visibility=ws.linking_visibility,
+        enforcement_mode=ws.enforcement_mode,
+        explicit_edges_enabled=ws.explicit_edges_enabled,
+    )
+    probe.add_document(doc)
+    reviewable = probe.reviewable_sources()
+    return reviewable[0] if len(reviewable) == 1 else None
 
 
 def _approval_marker_lines(text: str, proposal_id: str) -> List[str]:
@@ -1444,7 +1581,13 @@ def _approval_marker_valid(lines: Sequence[str], content_hash: str) -> bool:
 def _target_contains_exact_declaration(
     target_text: str, proposal_source: str, registry,
 ) -> bool:
-    probe = Workspace(registry=registry)
+    probe = Workspace(
+        registry=registry,
+        schema_version=registry.workspace_schema_version,
+        linking_visibility=registry.linking_visibility,
+        enforcement_mode=registry.enforcement_mode,
+        explicit_edges_enabled=registry.explicit_edges_enabled,
+    )
     proposal = _declaration_for_source(probe, proposal_source)
     if proposal is None:
         return False
@@ -1453,11 +1596,17 @@ def _target_contains_exact_declaration(
         document = parse_text(target_text, file="<approval-target>")
     except ParseError:
         return False
-    target = Workspace(registry=registry)
+    target = Workspace(
+        registry=registry,
+        schema_version=registry.workspace_schema_version,
+        linking_visibility=registry.linking_visibility,
+        enforcement_mode=registry.enforcement_mode,
+        explicit_edges_enabled=registry.explicit_edges_enabled,
+    )
     target.add_document(document)
     return any(
         declaration_content_hash(declaration) == expected
-        for declaration in target.declarations)
+        for declaration in target.reviewable_sources())
 
 
 def _queued_submit_result(
@@ -1488,7 +1637,7 @@ def _queued_submit_result(
 
 
 def _no_policy_assessment(
-    declaration: Declaration,
+    declaration: ReviewableSource,
     *,
     warnings_count: int,
     workspace_paths: Sequence[str],
@@ -1533,8 +1682,14 @@ def _no_policy_assessment(
     }
     return RoutingAssessment(
         decision=RoutingDecision.QUEUE,
-        rule="no_policy",
-        reason_codes=("policy_missing",),
+        rule=(
+            "floor:explicit_edge_human_review_required"
+            if requires_human_edge_review(declaration) else "no_policy"),
+        reason_codes=(
+            ("explicit_edge_human_review_required", "policy_missing")
+            if requires_human_edge_review(declaration)
+            else ("policy_missing",)
+        ),
         policy_hash=NO_POLICY_HASH,
         content_hash=content_hash,
         input_snapshot=snapshot,

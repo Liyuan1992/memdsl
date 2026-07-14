@@ -80,7 +80,7 @@ jobs:
         run: python -m pytest -q
       - name: Phase stdio, scope-denial, v1/v2, and quarantine gates
         run: |
-          python -m pytest -q tests/test_phase_three_indexed_query_trace.py tests/test_phase_four_use_dialect.py tests/test_phase_five_quarantine_enforcement.py
+          python -m pytest -q tests/test_phase_three_indexed_query_trace.py tests/test_phase_four_use_dialect.py tests/test_phase_five_quarantine_enforcement.py tests/test_phase_six_explicit_edges.py
       - name: MCP inspect
         run: python -m memdsl.mcp_server --inspect -w examples/alex
 
@@ -112,7 +112,7 @@ jobs:
           python -m pytest -q
       - name: Synthetic scale and security stop gates
         run: |
-          python -m pytest -q tests/test_phase_minus_one_characterization.py tests/test_phase_two_catalog_budget.py tests/test_phase_three_indexed_query_trace.py tests/test_phase_four_use_dialect.py tests/test_phase_five_quarantine_enforcement.py
+          python -m pytest -q tests/test_phase_minus_one_characterization.py tests/test_phase_two_catalog_budget.py tests/test_phase_three_indexed_query_trace.py tests/test_phase_four_use_dialect.py tests/test_phase_five_quarantine_enforcement.py tests/test_phase_six_explicit_edges.py
       - name: Build, Twine, member listing, and privacy scan
         run: |
           python -m build

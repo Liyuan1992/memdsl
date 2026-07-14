@@ -23,6 +23,7 @@ auto-approved into the PROVISIONAL layer.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import os
 from typing import Callable, List, Mapping, Optional, Sequence, Union
 
@@ -34,6 +35,7 @@ from memdsl.compiler import (
     source_state_signature,
 )
 from memdsl.compliance import check_compliance
+from memdsl.edge import build_explicit_edge_catalog, explain_explicit_edge
 from memdsl.graph import (
     TRACE_DEFAULT_MAX_BYTES,
     TRACE_DEFAULT_MAX_DEPTH,
@@ -285,7 +287,11 @@ class MemdslMCPService:
             principal=self.principal or None,
             principal_trusted=self.principal_trusted,
             principal_roles=self.principal_roles,
-            compatibility_mode="workspace.v2",
+            compatibility_mode=(
+                "workspace.v2"
+                if compiled.workspace_schema_version == "memdsl.workspace.v2"
+                else compiled.workspace_schema_version
+            ),
             enforcement_mode=compiled.enforcement_mode,
         ))
 
@@ -532,6 +538,49 @@ class MemdslMCPService:
                 )["diagnostic_summary"],
             })
             payload.pop("workspace_paths", None)
+        if ws.explicit_edges_enabled:
+            readable_edge_catalog = build_explicit_edge_catalog(
+                view, include_inactive=True)
+            visible_diagnostic_keys = {
+                (
+                    item.code, item.severity, item.message,
+                    item.file, item.line, item.decl_id,
+                )
+                for item in view.visible_diagnostics()
+            }
+            status_diagnostics = [
+                item for item in compiled.diagnostics
+                if (
+                    item.code, item.severity, item.message,
+                    item.file, item.line, item.decl_id,
+                ) in visible_diagnostic_keys
+            ]
+            if view.enforcement_active:
+                payload["view"]["diagnostic_summary"] = {
+                    **diagnostic_summary(status_diagnostics),
+                    "blocking": sum(
+                        1 for item in status_diagnostics
+                        if item in view.blocking_diagnostics),
+                    "enforced": sum(
+                        1 for item in status_diagnostics
+                        if item.enforcement_scope != "report"),
+                }
+            payload.update({
+                "schema_version": (
+                    "memdsl.mcp.status.explicit-edge.experimental.v1"),
+                "explicit_edges": readable_edge_catalog["total"],
+                "authoritative_explicit_edges": sum(
+                    1 for item in readable_edge_catalog["edges"]
+                    if item["authoritative_graph"]),
+                "registered_edge_relations": ws.registry.edge_relation_names(),
+                "edge_contract": "experimental-v1",
+                "diagnostic_summary": diagnostic_summary(status_diagnostics),
+                "boundary": (
+                    payload["boundary"]
+                    + " Explicit Edges always queue for a human; Source remains "
+                    "authority and review/audit is not a non-bypassable ledger."
+                ),
+            })
         return payload
 
     def memory_map(self) -> dict:
@@ -843,6 +892,24 @@ class MemdslMCPService:
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
         view = self.resolved_view(compiled)
+        if (
+            compiled.workspace.explicit_edges_enabled
+            and ref.startswith(("relation_edge:", "explicit_edge:"))
+        ):
+            payload = explain_explicit_edge(view, ref)
+            payload["schema_version"] = (
+                "memdsl.mcp.explain.explicit-edge.experimental.v1")
+            if len(json.dumps(
+                    payload, ensure_ascii=False, sort_keys=True,
+                    separators=(",", ":")).encode("utf-8")) > max_bytes:
+                return {
+                    "ok": False,
+                    "schema_version": payload["schema_version"],
+                    "status": "too_large",
+                    "error": "edge_explain_exceeds_max_bytes",
+                    "next_actions": ["Increase max_bytes and retry the exact Edge id."],
+                }
+            return payload
         if view.enforcement_active:
             try:
                 return build_resolved_explain(
@@ -1027,6 +1094,52 @@ class MemdslMCPService:
         except (ParseError, SchemaError) as exc:
             return self._workspace_error(schema, exc)
         view = self.resolved_view(compiled)
+        requested_type = memory_type or kind
+        if (
+            compiled.workspace.explicit_edges_enabled
+            and requested_type in {"relation_edge", "explicit_edge"}
+        ):
+            if subject:
+                return {
+                    "ok": False,
+                    "schema_version": "memdsl.mcp.list.explicit-edge.experimental.v1",
+                    "status": "invalid",
+                    "error": "explicit_edges_do_not_use_subject_filter",
+                }
+            if cursor:
+                return {
+                    "ok": False,
+                    "schema_version": "memdsl.mcp.list.explicit-edge.experimental.v1",
+                    "status": "invalid",
+                    "error": "explicit_edge_cursor_not_supported",
+                }
+            limit = _clamp_int(limit, 1, 500, 100)
+            byte_limit = _clamp_int(
+                max_bytes, 1024, 1024 * 1024, DEFAULT_READ_MAX_BYTES)
+            catalog = build_explicit_edge_catalog(
+                view, include_inactive=include_inactive)
+            payload = {
+                "ok": True,
+                "schema_version": "memdsl.mcp.list.explicit-edge.experimental.v1",
+                "status": "ok",
+                "total": catalog["total"],
+                "items": [],
+                "truncated": catalog["total"] > limit,
+                "boundary": catalog["boundary"],
+                "next_actions": [
+                    "Call memory_explain with an exact relation_edge:<id>."
+                ],
+            }
+            for item in catalog["edges"][:limit]:
+                candidate = dict(payload)
+                candidate["items"] = payload["items"] + [item]
+                if len(json.dumps(
+                        candidate, ensure_ascii=False, sort_keys=True,
+                        separators=(",", ":")).encode("utf-8")) > byte_limit:
+                    payload["truncated"] = True
+                    break
+                payload["items"].append(item)
+            return payload
         if view.enforcement_active:
             try:
                 return build_resolved_list(
@@ -1069,7 +1182,6 @@ class MemdslMCPService:
         )
         items = []
         for d in pool:
-            requested_type = memory_type or kind
             if requested_type and d.kind != requested_type:
                 continue
             if subject and d.subject != subject:
@@ -1107,7 +1219,7 @@ class MemdslMCPService:
         items = []
         for descriptor in compiled.registry.descriptors():
             items.append(descriptor.as_dict())
-        return {
+        payload = {
             "ok": True,
             "schema_version": schema,
             "status": "ok",
@@ -1118,6 +1230,15 @@ class MemdslMCPService:
                 "Choose a loaded domain type whose runtime_role and required_fields match the memory being proposed.",
             ],
         }
+        if compiled.workspace.explicit_edges_enabled:
+            payload["schema_version"] = (
+                "memdsl.mcp.types.explicit-edge.experimental.v1")
+            payload["edge_relations"] = [
+                descriptor.as_dict()
+                for descriptor in compiled.registry.edge_relation_descriptors()
+            ]
+            payload["edge_contract"] = "experimental-v1"
+        return payload
 
     def lint_workspace(self) -> dict:
         self.require_scope(SUMMARY_SCOPE)
@@ -1129,14 +1250,17 @@ class MemdslMCPService:
         ws = compiled.workspace
         diags = lint(compiled)
         view = self.resolved_view(compiled)
-        if view.enforcement_active:
-            visible_keys = {
-                (
-                    item.code, item.severity, item.message,
-                    item.file, item.line, item.decl_id,
-                )
-                for item in view.visible_diagnostics()
-            }
+        visible_keys = {
+            (
+                item.code, item.severity, item.message,
+                item.file, item.line, item.decl_id,
+            )
+            for item in view.visible_diagnostics()
+        }
+        if ws.explicit_edges_enabled:
+            edge_catalog = build_explicit_edge_catalog(
+                view, include_inactive=True)
+        if ws.explicit_edges_enabled or view.enforcement_active:
             diags = [
                 item for item in diags
                 if (
@@ -1160,7 +1284,13 @@ class MemdslMCPService:
                 "total": len(diags),
                 "errors": errors,
                 "warnings": warnings,
-                "compiler": diagnostic_summary(compiled.diagnostics),
+                "compiler": diagnostic_summary([
+                    item for item in compiled.diagnostics
+                    if (
+                        item.code, item.severity, item.message,
+                        item.file, item.line, item.decl_id,
+                    ) in visible_keys
+                ]),
             },
             "diagnostics": [
                 {
@@ -1179,17 +1309,54 @@ class MemdslMCPService:
         }
         if view.enforcement_active:
             safe_view_envelope = view.envelope(include_diagnostics=True)
-            payload["view"] = view.envelope(include_diagnostics=False)
+            safe_view_diagnostics = list(view.visible_diagnostics())
             payload["diagnostics"] = safe_view_envelope["diagnostics"]
+            safe_codes = {}
+            for item in payload["diagnostics"]:
+                code = str(item.get("code", ""))
+                safe_codes[code] = safe_codes.get(code, 0) + 1
             payload["diagnostic_summary"] = {
-                "total": len(diags),
-                "errors": errors,
-                "warnings": warnings,
-                "view": view.envelope(
-                    include_diagnostics=False,
-                    include_quarantined=False,
-                )["diagnostic_summary"],
+                "total": len(payload["diagnostics"]),
+                "errors": sum(
+                    1 for item in payload["diagnostics"]
+                    if item.get("severity") == "error"),
+                "warnings": sum(
+                    1 for item in payload["diagnostics"]
+                    if item.get("severity") == "warning"),
+                "view": {
+                    "total": len(payload["diagnostics"]),
+                    "errors": sum(
+                        1 for item in payload["diagnostics"]
+                        if item.get("severity") == "error"),
+                    "warnings": sum(
+                        1 for item in payload["diagnostics"]
+                        if item.get("severity") == "warning"),
+                    "codes": dict(sorted(safe_codes.items())),
+                    "blocking": sum(
+                        1 for item in safe_view_diagnostics
+                        if item in view.blocking_diagnostics),
+                    "enforced": sum(
+                        1 for item in safe_view_diagnostics
+                        if item.enforcement_scope != "report"),
+                },
             }
+            safe_view_envelope["diagnostic_summary"] = {
+                **diagnostic_summary(safe_view_diagnostics),
+                "blocking": sum(
+                    1 for item in safe_view_diagnostics
+                    if item in view.blocking_diagnostics),
+                "enforced": sum(
+                    1 for item in safe_view_diagnostics
+                    if item.enforcement_scope != "report"),
+            }
+            safe_view_envelope.pop("diagnostics", None)
+            payload["view"] = safe_view_envelope
+        if ws.explicit_edges_enabled:
+            payload["schema_version"] = (
+                "memdsl.mcp.lint.explicit-edge.experimental.v1")
+            payload["explicit_edges"] = edge_catalog["total"]
+            payload["edge_events"] = sum(
+                len(item["events"]) for item in edge_catalog["edges"])
         return payload
 
     # ---- governed writes ----
@@ -1280,6 +1447,8 @@ class MemdslMCPService:
         rule = str(result.get("rule") or result.get("route_rule") or "no_policy")
         reason_codes = list(result.get("reason_codes") or (
             ["policy_missing"] if policy is None else ["human_review_required"]))
+        is_explicit_edge = str(result.get("declaration_id", "")).startswith((
+            "relation_edge:", "relation_edge_event:"))
         if route == "auto_approved":
             boundary = AUTO_APPROVED_BOUNDARY
             next_actions = [
@@ -1293,15 +1462,27 @@ class MemdslMCPService:
                 "Use the returned existing proposal or declaration id; do not resubmit it."
             ]
         else:
-            boundary = (
-                PROPOSE_BOUNDARY
-                + (f" Routing reason: {reason_codes[0]}." if reason_codes else "")
-            )
-            next_actions = [
-                "Tell the user the proposal is pending and how to review it: "
-                "`memdsl review list <workspace>` then "
-                f"`memdsl review approve <workspace> {result.get('proposal_id', '')} --into <file.mem>`.",
-            ]
+            if is_explicit_edge:
+                boundary = (
+                    "An explicit Edge proposal is not graph authority. The "
+                    "immutable Phase 6 floor requires human confirmation in a "
+                    "dedicated Edge target file; pending records are never served."
+                )
+                next_actions = [
+                    "Use `memdsl edge confirm <workspace> "
+                    f"{result.get('proposal_id', '')}` after human review."
+                ]
+            else:
+                boundary = (
+                    PROPOSE_BOUNDARY
+                    + (f" Routing reason: {reason_codes[0]}."
+                       if reason_codes else "")
+                )
+                next_actions = [
+                    "Tell the user the proposal is pending and how to review it: "
+                    "`memdsl review list <workspace>` then "
+                    f"`memdsl review approve <workspace> {result.get('proposal_id', '')} --into <file.mem>`.",
+                ]
         payload = {
             "ok": True,
             "schema_version": schema,

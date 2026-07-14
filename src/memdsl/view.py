@@ -1,7 +1,7 @@
 """Deterministic report, quarantine, and strict resolved views.
 
 Phase 5 keeps legacy/report serving behavior intact and enables enforcement
-only for ``memdsl.workspace.v2`` workspaces that explicitly opt in.  Source is
+only for ``memdsl.workspace.v2``/``v3`` workspaces that explicitly opt in. Source is
 still authoritative; this module classifies declarations for one read context
 without editing source or closing the lint/review repair lane.
 """
@@ -224,23 +224,35 @@ class ResolvedView:
     def visible_diagnostics(self) -> Tuple[ViewDiagnostic, ...]:
         """Hide diagnostics whose source is entirely unauthorized."""
         unauthorized = {id(item) for item in self.unauthorized}
-        if not unauthorized or self.compiled is None:
+        if self.compiled is None:
             return self.diagnostics
         visible = []
         for diagnostic in self.diagnostics:
-            owned = (
-                tuple(self.compiled.occurrences_by_id.get(diagnostic.decl_id, ()))
-                if diagnostic.decl_id else ()
-            )
-            if owned and all(id(item) in unauthorized for item in owned):
-                continue
-            file_items = tuple(
-                item for item in self.compiled.declarations
-                if item.file == diagnostic.file)
-            if not owned and file_items and all(
-                    id(item) in unauthorized for item in file_items):
-                continue
+            if unauthorized:
+                owned = (
+                    tuple(self.compiled.occurrences_by_id.get(
+                        diagnostic.decl_id, ()))
+                    if diagnostic.decl_id else ()
+                )
+                if owned and all(id(item) in unauthorized for item in owned):
+                    continue
+                file_items = tuple(
+                    item for item in self.compiled.declarations
+                    if item.file == diagnostic.file)
+                if not owned and file_items and all(
+                        id(item) in unauthorized for item in file_items):
+                    continue
             visible.append(diagnostic)
+        if self.compiled.workspace.explicit_edges_enabled:
+            visible_edge_ids = _readable_explicit_diagnostic_ids(self)
+            visible = [
+                diagnostic for diagnostic in visible
+                if (
+                    not str(diagnostic.decl_id or "").startswith((
+                        "relation_edge:", "relation_edge_event:"))
+                    or str(diagnostic.decl_id) in visible_edge_ids
+                )
+            ]
         return tuple(visible)
 
 
@@ -257,7 +269,14 @@ def resolve_view(
             source_fingerprint=compiled.source_fingerprint,
             as_of=_dt.date.today(),
             compatibility_mode=(
-                "workspace.v2" if mode in {"quarantine", "strict"} else "v0.6"),
+                "workspace.v2"
+                if (
+                    mode in {"quarantine", "strict"}
+                    and compiled.workspace_schema_version == "memdsl.workspace.v2"
+                )
+                else compiled.workspace_schema_version
+                if mode in {"quarantine", "strict"}
+                else "v0.6"),
             enforcement_mode=mode,
         )
     if context.source_fingerprint != compiled.source_fingerprint:
@@ -267,10 +286,11 @@ def resolve_view(
             "enforcement_mode must be 'report', 'quarantine', or 'strict'")
     if (
         context.enforcement_mode in {"quarantine", "strict"}
-        and compiled.workspace_schema_version != "memdsl.workspace.v2"
+        and compiled.workspace_schema_version not in {
+            "memdsl.workspace.v2", "memdsl.workspace.v3"}
     ):
         raise ValueError(
-            "quarantine/strict enforcement requires memdsl.workspace.v2")
+            "quarantine/strict enforcement requires memdsl.workspace.v2 or v3")
 
     if context.enforcement_mode == "report":
         return _report_view(compiled, context)
@@ -307,7 +327,11 @@ def _report_view(compiled: CompiledWorkspace, context: ViewContext) -> ResolvedV
     excluded = tuple(
         declaration for declaration in compiled.declarations
         if id(declaration) not in current_objects)
-    diagnostics = tuple(_compiler_diagnostic(item) for item in compiled.diagnostics)
+    diagnostics = (
+        _all_diagnostics(compiled, context)
+        if compiled.workspace.explicit_edges_enabled else
+        tuple(_compiler_diagnostic(item) for item in compiled.diagnostics)
+    )
     return ResolvedView(
         view_id=_view_id(context),
         context=context,
@@ -508,9 +532,14 @@ def _readable(declaration: Declaration, context: ViewContext) -> bool:
         raw = declaration.fields.get("access_policy")
     elif "access" in declaration.fields:
         raw = declaration.fields.get("access")
+    return access_policy_readable(raw, context)
+
+
+def access_policy_readable(raw, context: ViewContext) -> bool:
+    """Evaluate one record-level access policy without exposing object identity."""
     if raw is None or raw == {}:
         return True
-    if not isinstance(raw, dict):
+    if not isinstance(raw, Mapping):
         return False
     readers = raw.get("readers")
     if not context.principal_trusted or not context.principal:
@@ -521,6 +550,40 @@ def _readable(declaration: Declaration, context: ViewContext) -> bool:
     allowed = {item.strip() for item in readers if item.strip()}
     identities = {context.principal} | set(context.principal_roles)
     return "*" in allowed or bool(allowed & identities)
+
+
+def _readable_explicit_diagnostic_ids(view: ResolvedView) -> set:
+    """Return Edge/event ids whose record and resolved endpoints are readable."""
+    compiled = view.compiled
+    if compiled is None:
+        return set()
+    readable = set()
+    for edge in compiled.explicit_edges:
+        if not access_policy_readable(edge.access_policy, view.context):
+            continue
+        endpoint_hidden = False
+        for endpoint_id in (edge.source_id, edge.target_id):
+            if endpoint_id is None:
+                continue
+            endpoint = compiled.resolved_by_id.get(endpoint_id)
+            if endpoint is not None and not _readable(endpoint, view.context):
+                endpoint_hidden = True
+                break
+        if not endpoint_hidden:
+            for candidate_id in edge.candidate_ids:
+                occurrences = compiled.occurrences_by_id.get(candidate_id, ())
+                if occurrences and any(
+                        not _readable(item, view.context)
+                        for item in occurrences):
+                    endpoint_hidden = True
+                    break
+        if endpoint_hidden:
+            continue
+        readable.add(edge.edge_id)
+        readable.update(
+            event.event_id
+            for event in compiled.edge_events_by_edge.get(edge.edge_id, ()))
+    return readable
 
 
 def _expired(declaration: Declaration, as_of: _dt.date) -> bool:

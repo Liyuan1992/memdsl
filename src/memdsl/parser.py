@@ -16,12 +16,21 @@ ATOM covers bare identifiers, dotted symbols, numbers, dates
 which are kept verbatim as strings.
 
 Comments start with '#' and run to end of line.
+
+In a workspace-v3 consumer, the reserved kinds ``relation_edge`` /
+``explicit_edge`` and their ``*_event`` lifecycle records are classified into
+dedicated Document collections. Workspace loading, not tokenization, enforces
+the v3 feature gate so v1/v2 remain fail-closed.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
+
+
+EXPLICIT_EDGE_KINDS = frozenset({"relation_edge", "explicit_edge"})
+EDGE_EVENT_KINDS = frozenset({"relation_edge_event", "explicit_edge_event"})
 
 
 class ParseError(Exception):
@@ -112,6 +121,30 @@ class RawDeclaration:
     module: Optional[str] = None
 
 
+@dataclass
+class RawExplicitEdge:
+    """One first-class explicit Edge source declaration."""
+
+    kind: str
+    name: str
+    fields: dict
+    file: str
+    line: int
+    module: Optional[str] = None
+
+
+@dataclass
+class RawEdgeLifecycleEvent:
+    """One append-only lifecycle event for a stable explicit Edge id."""
+
+    kind: str
+    name: str
+    fields: dict
+    file: str
+    line: int
+    module: Optional[str] = None
+
+
 @dataclass(frozen=True)
 class SourceStatement:
     """One document-level module/use statement with source location."""
@@ -125,6 +158,8 @@ class Document:
     module: Optional[str]
     uses: List[str] = field(default_factory=list)
     declarations: List[RawDeclaration] = field(default_factory=list)
+    explicit_edges: List[RawExplicitEdge] = field(default_factory=list)
+    edge_events: List[RawEdgeLifecycleEvent] = field(default_factory=list)
     file: str = "<text>"
     module_statements: List[SourceStatement] = field(default_factory=list)
     use_statements: List[SourceStatement] = field(default_factory=list)
@@ -177,12 +212,23 @@ class _Parser:
                 if name_tok.kind != "atom":
                     raise ParseError(f"expected declaration name after '{kind}'", self.file, name_tok.line)
                 fields = self._parse_block()
-                doc.declarations.append(
-                    RawDeclaration(kind=kind, name=name_tok.value, fields=fields,
-                                   file=self.file, line=tok.line)
-                )
-        for d in doc.declarations:
-            d.module = doc.module
+                item_kwargs = {
+                    "kind": kind,
+                    "name": name_tok.value,
+                    "fields": fields,
+                    "file": self.file,
+                    "line": tok.line,
+                }
+                if kind in EXPLICIT_EDGE_KINDS:
+                    doc.explicit_edges.append(RawExplicitEdge(**item_kwargs))
+                elif kind in EDGE_EVENT_KINDS:
+                    doc.edge_events.append(RawEdgeLifecycleEvent(**item_kwargs))
+                else:
+                    doc.declarations.append(RawDeclaration(**item_kwargs))
+        for item in (
+            list(doc.declarations) + list(doc.explicit_edges) + list(doc.edge_events)
+        ):
+            item.module = doc.module
         return doc
 
     def _parse_block(self) -> dict:

@@ -1,4 +1,4 @@
-"""Internal deterministic workspace compilation through Phase 4.
+"""Internal deterministic workspace compilation through experimental Phase 6.
 
 This module is deliberately not re-exported from :mod:`memdsl`.  It provides
 the indexed, rebuildable representation used by the existing v0.6 read
@@ -9,6 +9,7 @@ and rebuilt from a :class:`memdsl.model.Workspace`.
 
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import json
 import os
@@ -17,10 +18,19 @@ from types import MappingProxyType
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from memdsl.lexical import query_terms
-from memdsl.model import Declaration, EXCLUDED_STATUSES, RELATION_FIELDS, Workspace
+from memdsl.model import (
+    EDGE_LIFECYCLE_ACTIONS,
+    Declaration,
+    EdgeLifecycleEvent,
+    ExplicitEdge,
+    EXCLUDED_STATUSES,
+    RELATION_FIELDS,
+    Workspace,
+)
 
 
 COMPILER_CONTRACT_VERSION = "memdsl.compiler.phase5.v1"
+EXPLICIT_EDGE_COMPILER_CONTRACT_VERSION = "memdsl.compiler.phase6.experimental.v1"
 
 
 @dataclass(frozen=True)
@@ -88,6 +98,56 @@ class CompiledEdge:
     ordinal: int
     candidate_ids: Tuple[str, ...] = ()
     visibility: str = "legacy"
+    record_id: str = ""
+    declared_by_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class CompiledEdgeLifecycleEvent:
+    """One resolved append-only lifecycle event for an explicit Edge."""
+
+    event_id: str
+    edge_ref: str
+    edge_id: Optional[str]
+    action: str
+    event_at: str
+    status: str
+    evidence: Mapping[str, object]
+    replacement_ref: str
+    replacement_id: Optional[str]
+    file: str
+    line: int
+
+
+@dataclass(frozen=True)
+class CompiledExplicitEdge:
+    """Compiled first-class Edge with stable identity and lifecycle state."""
+
+    edge_id: str
+    record_id: str
+    declared_by_ref: str
+    declared_by_id: Optional[str]
+    source_ref: str
+    source_id: Optional[str]
+    target_ref: str
+    target_id: Optional[str]
+    relation: str
+    status: str
+    lifecycle_status: str
+    evidence: Mapping[str, object]
+    lifecycle: Mapping[str, object]
+    access_policy: Mapping[str, object]
+    relation_stability: str
+    authoritative: bool
+    file: str
+    line: int
+    candidate_ids: Tuple[str, ...] = ()
+    events: Tuple[CompiledEdgeLifecycleEvent, ...] = ()
+    origin: str = "explicit_edge"
+
+    @property
+    def origin_ids(self) -> Tuple[str, ...]:
+        return (self.record_id,)
 
 
 @dataclass(frozen=True)
@@ -106,6 +166,7 @@ class UseResolution:
 
 DeclarationIndex = Mapping[str, Tuple[Declaration, ...]]
 EdgeIndex = Mapping[str, Tuple[CompiledEdge, ...]]
+ExplicitEdgeIndex = Mapping[str, Tuple[CompiledExplicitEdge, ...]]
 
 
 @dataclass(frozen=True)
@@ -138,6 +199,13 @@ class CompiledWorkspace:
     diagnostics: Tuple[CompilationDiagnostic, ...]
     revision_cycle_edge_ids: frozenset
     authoritative_supersedes: Tuple[CompiledEdge, ...]
+    explicit_edges: Tuple[CompiledExplicitEdge, ...]
+    explicit_edges_by_id: Mapping[str, CompiledExplicitEdge]
+    explicit_outgoing: ExplicitEdgeIndex
+    explicit_incoming: ExplicitEdgeIndex
+    authoritative_explicit_edges: Tuple[CompiledExplicitEdge, ...]
+    edge_events_by_edge: Mapping[str, Tuple[CompiledEdgeLifecycleEvent, ...]]
+    edge_relation_registry: Mapping[str, object]
     _legacy_incoming: EdgeIndex = field(repr=False, compare=False)
     _first_by_id: Mapping[str, Declaration] = field(repr=False, compare=False)
     _first_by_name: Mapping[str, Declaration] = field(repr=False, compare=False)
@@ -403,6 +471,8 @@ def compile_workspace(
                     ordinal=ordinal,
                     candidate_ids=candidate_ids,
                     visibility=visibility,
+                    record_id=declaration.id,
+                    declared_by_id=declaration.id,
                 )
                 _append(outgoing, declaration.id, edge)
                 if edge.target_id is not None:
@@ -465,6 +535,19 @@ def compile_workspace(
         if _is_active_source(edge, resolved_by_id)
         if edge.edge_id not in authority_cycle_edge_ids
     )
+    (
+        explicit_edges,
+        explicit_edges_by_id,
+        explicit_outgoing,
+        explicit_incoming,
+        authoritative_explicit_edges,
+        edge_events_by_edge,
+        explicit_edge_diagnostics,
+    ) = _compile_explicit_edges(
+        workspace=workspace,
+        resolve=resolve,
+    )
+    link_diagnostics.extend(explicit_edge_diagnostics)
     subject_routable, subject_diagnostics = _compile_subject_visibility(
         workspace=workspace,
         declarations=declarations,
@@ -524,12 +607,334 @@ def compile_workspace(
         diagnostics=diagnostics,
         revision_cycle_edge_ids=revision_cycle_edge_ids,
         authoritative_supersedes=authoritative_supersedes,
+        explicit_edges=explicit_edges,
+        explicit_edges_by_id=explicit_edges_by_id,
+        explicit_outgoing=explicit_outgoing,
+        explicit_incoming=explicit_incoming,
+        authoritative_explicit_edges=authoritative_explicit_edges,
+        edge_events_by_edge=edge_events_by_edge,
+        edge_relation_registry=MappingProxyType({
+            descriptor.name: descriptor
+            for descriptor in workspace.registry.edge_relation_descriptors()
+        }),
         _legacy_incoming=_freeze_edge_index(
             legacy_incoming, preserve_input_order=True),
         _first_by_id=MappingProxyType(dict(first_by_id)),
         _first_by_name=MappingProxyType(dict(first_by_name)),
         _subject_routable=MappingProxyType(dict(subject_routable)),
         workspace=workspace,
+    )
+
+
+def _compile_explicit_edges(
+    *,
+    workspace: Workspace,
+    resolve,
+) -> tuple:
+    """Compile Phase 6 explicit Edges without changing legacy node authority."""
+    diagnostics: List[CompilationDiagnostic] = []
+    occurrences: Dict[str, List[ExplicitEdge]] = {}
+    for edge in workspace.explicit_edges:
+        occurrences.setdefault(edge.id, []).append(edge)
+
+    unique_edges: Dict[str, ExplicitEdge] = {}
+    for edge_id, items in sorted(occurrences.items()):
+        ordered = sorted(items, key=_source_item_sort_key)
+        if len(ordered) == 1:
+            unique_edges[edge_id] = ordered[0]
+            continue
+        first = ordered[0]
+        for duplicate in ordered[1:]:
+            diagnostics.append(CompilationDiagnostic(
+                "duplicate_explicit_edge_id",
+                "error",
+                f"'{edge_id}' already declared at {first.file}:{first.line}",
+                duplicate.file,
+                duplicate.line,
+                edge_id,
+                related_ids=(edge_id,),
+            ))
+
+    event_occurrences: Dict[str, List[EdgeLifecycleEvent]] = {}
+    for event in workspace.edge_events:
+        event_occurrences.setdefault(event.id, []).append(event)
+    valid_event_keys = {
+        (event.file, event.line, event.id)
+        for event in workspace.edge_events
+        if len(event_occurrences[event.id]) == 1
+        if _explicit_edge_event_structurally_valid(event)
+    }
+
+    def resolve_edge(reference: str) -> Tuple[Optional[str], Tuple[str, ...], str]:
+        raw = str(reference or "")
+        canonical = (
+            raw
+            if raw.startswith("relation_edge:")
+            else f"relation_edge:{raw.split(':', 1)[-1]}"
+        )
+        matches = sorted(
+            [edge_id for edge_id in occurrences if edge_id == canonical]
+        )
+        if len(matches) == 1 and len(occurrences[matches[0]]) == 1:
+            return matches[0], tuple(matches), "resolved"
+        if matches:
+            return None, tuple(matches), "ambiguous"
+        return None, (), "not_found"
+
+    compiled_events: List[CompiledEdgeLifecycleEvent] = []
+    for event in sorted(workspace.edge_events, key=_edge_event_sort_key):
+        edge_id, candidates, edge_status = resolve_edge(event.edge_ref)
+        replacement_id: Optional[str] = None
+        replacement_status = "resolved"
+        if event.action == "supersede":
+            replacement_id, _, replacement_status = resolve_edge(event.replacement_ref)
+        compiled_event = CompiledEdgeLifecycleEvent(
+            event_id=event.id,
+            edge_ref=event.edge_ref,
+            edge_id=edge_id,
+            action=event.action,
+            event_at=event.event_at,
+            status=event.status,
+            evidence=MappingProxyType(dict(event.evidence or {})),
+            replacement_ref=event.replacement_ref,
+            replacement_id=replacement_id,
+            file=event.file,
+            line=event.line,
+        )
+        compiled_events.append(compiled_event)
+        if edge_status != "resolved":
+            diagnostics.append(CompilationDiagnostic(
+                "unresolved_edge_event_target"
+                if edge_status == "not_found" else "ambiguous_edge_event_target",
+                "error",
+                f"edge lifecycle event '{event.id}' cannot resolve Edge "
+                f"'{event.edge_ref}'",
+                event.file,
+                event.line,
+                event.id,
+                related_ids=candidates,
+            ))
+        if event.action == "supersede" and replacement_status != "resolved":
+            diagnostics.append(CompilationDiagnostic(
+                "unresolved_edge_replacement",
+                "error",
+                f"edge lifecycle event '{event.id}' cannot resolve replacement "
+                f"Edge '{event.replacement_ref}'",
+                event.file,
+                event.line,
+                event.id,
+            ))
+
+    events_by_edge: Dict[str, List[CompiledEdgeLifecycleEvent]] = {}
+    for event in compiled_events:
+        if event.edge_id is not None:
+            events_by_edge.setdefault(event.edge_id, []).append(event)
+    frozen_events = MappingProxyType({
+        edge_id: tuple(sorted(events, key=_compiled_edge_event_sort_key))
+        for edge_id, events in sorted(events_by_edge.items())
+    })
+
+    compiled: List[CompiledExplicitEdge] = []
+    outgoing: Dict[str, list] = {}
+    incoming: Dict[str, list] = {}
+    by_id: Dict[str, CompiledExplicitEdge] = {}
+    for edge_id, edge in sorted(unique_edges.items()):
+        source_resolution = resolve(edge.source_ref)
+        target_resolution = resolve(edge.target_ref)
+        declared_by_resolution = resolve(edge.declared_by_ref)
+        relation_descriptor = workspace.registry.resolve_edge_relation(edge.relation)
+        resolution_status = "resolved"
+        candidates = tuple(sorted(set(
+            declared_by_resolution.candidate_ids
+            + source_resolution.candidate_ids
+            + target_resolution.candidate_ids
+        )))
+        if relation_descriptor is None:
+            resolution_status = "unknown_relation"
+        elif declared_by_resolution.status != "resolved":
+            resolution_status = f"declared_by_{declared_by_resolution.status}"
+        elif source_resolution.status != "resolved":
+            resolution_status = f"source_{source_resolution.status}"
+        elif target_resolution.status != "resolved":
+            resolution_status = f"target_{target_resolution.status}"
+
+        lifecycle_status = edge.status
+        applied_events = []
+        lifecycle = dict(edge.lifecycle)
+        for event in frozen_events.get(edge_id, ()):
+            if (
+                (event.file, event.line, event.event_id) not in valid_event_keys
+                or event.status != "active"
+                or event.action not in EDGE_LIFECYCLE_ACTIONS
+            ):
+                continue
+            if event.action == "confirm":
+                lifecycle_status = "active"
+            elif event.action == "dispute":
+                lifecycle_status = "disputed"
+            elif event.action == "retract":
+                lifecycle_status = "retracted"
+            elif event.action == "supersede" and event.replacement_id:
+                lifecycle_status = "superseded"
+                lifecycle["superseded_by"] = event.replacement_id
+            lifecycle["last_event"] = event.event_id
+            lifecycle["last_event_at"] = event.event_at
+            applied_events.append(event)
+        lifecycle["status"] = lifecycle_status
+
+        source_decl = source_resolution.declaration
+        target_decl = target_resolution.declaration
+        endpoint_active = bool(
+            source_decl is not None
+            and target_decl is not None
+            and source_decl.status == "active"
+            and target_decl.status == "active"
+            and source_decl.status not in EXCLUDED_STATUSES
+            and target_decl.status not in EXCLUDED_STATUSES
+        )
+        authoritative = bool(
+            resolution_status == "resolved"
+            and lifecycle_status == "active"
+            and endpoint_active
+            and _explicit_edge_structurally_valid(edge)
+        )
+        item = CompiledExplicitEdge(
+            edge_id=edge_id,
+            record_id=edge_id,
+            declared_by_ref=edge.declared_by_ref,
+            declared_by_id=declared_by_resolution.target_id,
+            source_ref=edge.source_ref,
+            source_id=source_resolution.target_id,
+            target_ref=edge.target_ref,
+            target_id=target_resolution.target_id,
+            relation=edge.relation,
+            status=resolution_status,
+            lifecycle_status=lifecycle_status,
+            evidence=MappingProxyType(dict(edge.evidence or {})),
+            lifecycle=MappingProxyType(lifecycle),
+            access_policy=MappingProxyType(dict(edge.access_policy)),
+            relation_stability=(
+                relation_descriptor.stability if relation_descriptor else "unknown"),
+            authoritative=authoritative,
+            file=edge.file,
+            line=edge.line,
+            candidate_ids=candidates,
+            events=tuple(applied_events),
+        )
+        compiled.append(item)
+        by_id[edge_id] = item
+        if resolution_status != "resolved":
+            code = {
+                "unknown_relation": "unknown_edge_relation",
+                "declared_by_ambiguous": "ambiguous_edge_declared_by",
+                "declared_by_kind_mismatch": "edge_declared_by_kind_mismatch",
+                "declared_by_not_found": "unresolved_edge_declared_by",
+                "source_ambiguous": "ambiguous_edge_source",
+                "source_kind_mismatch": "edge_source_kind_mismatch",
+                "source_not_found": "unresolved_edge_source",
+                "target_ambiguous": "ambiguous_edge_target",
+                "target_kind_mismatch": "edge_target_kind_mismatch",
+                "target_not_found": "unresolved_edge_target",
+            }.get(resolution_status, "invalid_explicit_edge")
+            diagnostics.append(CompilationDiagnostic(
+                code,
+                "error",
+                f"explicit Edge '{edge_id}' could not compile: {resolution_status}",
+                edge.file,
+                edge.line,
+                edge_id,
+                related_ids=candidates,
+            ))
+        if authoritative and item.source_id and item.target_id:
+            _append(outgoing, item.source_id, item)
+            _append(incoming, item.target_id, item)
+
+    authoritative = tuple(
+        item for item in compiled if item.authoritative)
+    return (
+        tuple(compiled),
+        MappingProxyType(by_id),
+        _freeze_explicit_edge_index(outgoing),
+        _freeze_explicit_edge_index(incoming),
+        authoritative,
+        frozen_events,
+        diagnostics,
+    )
+
+
+def _explicit_edge_structurally_valid(edge: ExplicitEdge) -> bool:
+    allowed = {
+        "declared_by", "source", "target", "relation", "evidence",
+        "lifecycle", "status", "scope", "access_policy", "access",
+    }
+    if set(edge.fields) - allowed:
+        return False
+    if any(
+        not value or ":" not in value
+        for value in (
+            edge.declared_by_ref, edge.source_ref, edge.target_ref)
+    ):
+        return False
+    lifecycle = edge.fields.get("lifecycle")
+    if not isinstance(lifecycle, dict):
+        return False
+    if edge.status not in {
+        "active", "candidate", "disputed", "quarantined", "retracted",
+        "superseded",
+    }:
+        return False
+    if not _valid_edge_evidence(edge.evidence):
+        return False
+    raw_access = edge.fields.get(
+        "access_policy", edge.fields.get("access"))
+    return _valid_edge_access_policy(raw_access)
+
+
+def _explicit_edge_event_structurally_valid(
+    event: EdgeLifecycleEvent,
+) -> bool:
+    allowed = {
+        "edge", "action", "event_at", "replacement", "evidence",
+        "lifecycle", "status",
+    }
+    if set(event.fields) - allowed:
+        return False
+    if not event.edge_ref or event.action not in EDGE_LIFECYCLE_ACTIONS:
+        return False
+    if not isinstance(event.fields.get("lifecycle"), dict):
+        return False
+    if event.status != "active" or not _valid_edge_evidence(event.evidence):
+        return False
+    try:
+        _dt.datetime.fromisoformat(event.event_at.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return False
+    if event.action == "supersede" and not event.replacement_ref:
+        return False
+    return True
+
+
+def _valid_edge_evidence(value) -> bool:
+    return bool(
+        isinstance(value, Mapping)
+        and isinstance(value.get("source"), str)
+        and value.get("source")
+        and isinstance(value.get("quote"), str)
+        and value.get("quote")
+    )
+
+
+def _valid_edge_access_policy(value) -> bool:
+    if value is None or value == {}:
+        return True
+    if not isinstance(value, Mapping):
+        return False
+    if set(value) - {"readers", "writers", "reviewers"}:
+        return False
+    return all(
+        isinstance(items, list)
+        and all(isinstance(item, str) for item in items)
+        for items in value.values()
     )
 
 
@@ -1215,6 +1620,11 @@ def source_state_signature(
 
 
 def _compiled_fingerprint(workspace: Workspace, paths: Sequence[str]) -> str:
+    compiler_contract = (
+        EXPLICIT_EDGE_COMPILER_CONTRACT_VERSION
+        if workspace.explicit_edges_enabled
+        else COMPILER_CONTRACT_VERSION
+    )
     if paths:
         # Reuse the existing audited content fingerprint, then bind it to the
         # compiler contract version.  Paths are normalized and sorted first so
@@ -1223,12 +1633,12 @@ def _compiled_fingerprint(workspace: Workspace, paths: Sequence[str]) -> str:
 
         source_digest = workspace_fingerprint(paths, workspace=workspace)
         payload = {
-            "compiler_contract": COMPILER_CONTRACT_VERSION,
+            "compiler_contract": compiler_contract,
             "workspace_fingerprint": source_digest,
         }
     else:
         payload = {
-            "compiler_contract": COMPILER_CONTRACT_VERSION,
+            "compiler_contract": compiler_contract,
             "workspace": _in_memory_workspace_payload(workspace),
         }
     return _digest_json(payload)
@@ -1260,6 +1670,42 @@ def _in_memory_workspace_payload(workspace: Workspace) -> dict:
         item.pop("source", None)
         descriptors.append(_json_safe(item))
     descriptors.sort(key=lambda item: str(item.get("name", "")))
+    edge_relations = []
+    for descriptor in workspace.registry.edge_relation_descriptors():
+        item = descriptor.as_dict()
+        item.pop("source", None)
+        edge_relations.append(_json_safe(item))
+    edge_relations.sort(key=lambda item: str(item.get("name", "")))
+    source_edges = [
+        {
+            "kind": edge.kind,
+            "name": edge.name,
+            "module": edge.module,
+            "file": str(edge.file).replace("\\", "/"),
+            "line": edge.line,
+            "fields": _json_safe(edge.fields),
+        }
+        for edge in workspace.explicit_edges
+    ]
+    source_edges.sort(key=lambda item: (
+        item["name"], item["file"], item["line"],
+        json.dumps(item["fields"], ensure_ascii=False, sort_keys=True),
+    ))
+    edge_events = [
+        {
+            "kind": event.kind,
+            "name": event.name,
+            "module": event.module,
+            "file": str(event.file).replace("\\", "/"),
+            "line": event.line,
+            "fields": _json_safe(event.fields),
+        }
+        for event in workspace.edge_events
+    ]
+    edge_events.sort(key=lambda item: (
+        item["name"], item["file"], item["line"],
+        json.dumps(item["fields"], ensure_ascii=False, sort_keys=True),
+    ))
     documents = []
     declaration_files = {str(item.file) for item in workspace.declarations}
     for document in workspace.documents:
@@ -1286,7 +1732,7 @@ def _in_memory_workspace_payload(workspace: Workspace) -> dict:
         str(item["module"] or ""),
         json.dumps(item, ensure_ascii=False, sort_keys=True),
     ))
-    return {
+    payload = {
         "workspace_schema_version": workspace.schema_version,
         "linking_visibility": workspace.linking_visibility,
         "enforcement_mode": workspace.enforcement_mode,
@@ -1294,6 +1740,14 @@ def _in_memory_workspace_payload(workspace: Workspace) -> dict:
         "documents": documents,
         "types": descriptors,
     }
+    if workspace.explicit_edges_enabled:
+        payload.update({
+            "explicit_edges_enabled": True,
+            "explicit_edges": source_edges,
+            "edge_events": edge_events,
+            "edge_relations": edge_relations,
+        })
+    return payload
 
 
 def _source_input_files(
@@ -1395,6 +1849,13 @@ def _freeze_edge_index(
     })
 
 
+def _freeze_explicit_edge_index(index: Dict[str, list]) -> ExplicitEdgeIndex:
+    return MappingProxyType({
+        key: tuple(sorted(values, key=_compiled_explicit_edge_sort_key))
+        for key, values in sorted(index.items())
+    })
+
+
 def _declaration_sort_key(declaration: Declaration) -> tuple:
     file_name = str(declaration.file)
     return (
@@ -1415,6 +1876,45 @@ def _edge_sort_key(edge: CompiledEdge) -> tuple:
         edge.target_id or edge.target_ref,
         edge.ordinal,
         edge.edge_id,
+    )
+
+
+def _compiled_explicit_edge_sort_key(edge: CompiledExplicitEdge) -> tuple:
+    return (
+        edge.source_id or edge.source_ref,
+        edge.relation,
+        edge.target_id or edge.target_ref,
+        edge.edge_id,
+    )
+
+
+def _source_item_sort_key(item) -> tuple:
+    return (
+        os.path.normcase(str(item.file)),
+        str(item.file),
+        item.line,
+        item.id,
+        _digest_json(_json_safe(item.fields)),
+    )
+
+
+def _edge_event_sort_key(event: EdgeLifecycleEvent) -> tuple:
+    return (
+        event.event_at,
+        event.id,
+        os.path.normcase(str(event.file)),
+        str(event.file),
+        event.line,
+    )
+
+
+def _compiled_edge_event_sort_key(event: CompiledEdgeLifecycleEvent) -> tuple:
+    return (
+        event.event_at,
+        event.event_id,
+        os.path.normcase(str(event.file)),
+        str(event.file),
+        event.line,
     )
 
 

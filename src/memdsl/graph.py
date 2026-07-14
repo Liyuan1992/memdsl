@@ -19,14 +19,22 @@ from memdsl.compiler import (
     ensure_compiled,
 )
 from memdsl.model import Declaration
-from memdsl.view import ResolvedView, resolve_view
+from memdsl.view import (
+    ResolvedView,
+    access_policy_readable,
+    diagnostic_summary,
+    resolve_view,
+)
 
 
 TRACE_SCHEMA = "memdsl.trace.v1"
 MCP_TRACE_SCHEMA = "memdsl.mcp.trace.v1"
 TRACE_SCHEMA_V2 = "memdsl.trace.v2"
 MCP_TRACE_SCHEMA_V2 = "memdsl.mcp.trace.v2"
+TRACE_SCHEMA_EXPLICIT_EDGE = "memdsl.trace.explicit-edge.experimental.v1"
+MCP_TRACE_SCHEMA_EXPLICIT_EDGE = "memdsl.mcp.trace.explicit-edge.experimental.v1"
 TRACE_CONTRACT_VERSION = "memdsl.trace.phase3.v1"
+EXPLICIT_EDGE_TRACE_CONTRACT_VERSION = "memdsl.trace.phase6.experimental.v1"
 TRACE_CURSOR_VERSION = 1
 TRACE_DEFAULT_MAX_DEPTH = 3
 TRACE_DEFAULT_MAX_NODES = 20
@@ -146,11 +154,6 @@ def _build_trace(
     if not isinstance(include_quarantined_metadata, bool):
         raise ValueError("include_quarantined_metadata must be a boolean")
     relation_filter = _normalized_relations(relations)
-    unknown_relations = sorted(set(relation_filter) - set(RELATION_REGISTRY))
-    if unknown_relations:
-        raise ValueError(
-            "unknown relation filter(s): " + ", ".join(unknown_relations))
-
     if isinstance(source, ResolvedView):
         view = source
         if view.compiled is None:
@@ -159,32 +162,20 @@ def _build_trace(
     else:
         compiled = ensure_compiled(source)
         view = resolve_view(compiled)
+    if compiled.workspace.explicit_edges_enabled:
+        schema_version = (
+            MCP_TRACE_SCHEMA_EXPLICIT_EDGE
+            if schema_version.startswith("memdsl.mcp.")
+            else TRACE_SCHEMA_EXPLICIT_EDGE
+        )
+    known_relations = set(RELATION_REGISTRY)
+    if compiled.workspace.explicit_edges_enabled:
+        known_relations.update(compiled.workspace.registry.edge_relation_names())
+    unknown_relations = sorted(set(relation_filter) - known_relations)
+    if unknown_relations:
+        raise ValueError(
+            "unknown relation filter(s): " + ", ".join(unknown_relations))
     enforced = view.enforcement_active
-    if view.blocked:
-        result = {
-            "ok": False,
-            "schema_version": schema_version,
-            "status": "compiler_error",
-            "view": view.envelope(include_diagnostics=False),
-            "available_nodes": 0,
-            "available_edges": 0,
-            "returned_nodes": 0,
-            "returned_edges": 0,
-            "nodes": [],
-            "tree_edges": [],
-            "back_edges": [],
-            "cross_edges": [],
-            "truncated": False,
-            "next_cursor": None,
-            "completeness": "blocked",
-            "next_actions": [
-                "Run lint and repair blocking identity/source diagnostics."
-            ],
-        }
-        if _json_bytes(result) > byte_limit:
-            raise ValueError(
-                "max_bytes is too small for the Trace error envelope")
-        return result
     if cursor:
         # Cursor revision identity wins over anchor resolution.  If Source or
         # View changed enough to remove an anchor, pagination must still fail
@@ -211,6 +202,52 @@ def _build_trace(
         if id(declaration) in serviceable_objects
         if enforced or not declaration.access_policy
     }
+    readable_explicit_edge_ids = {
+        edge.edge_id
+        for edge in compiled.authoritative_explicit_edges
+        if edge.source_id in visible_by_id
+        if edge.target_id in visible_by_id
+        if access_policy_readable(edge.access_policy, view.context)
+    }
+    safe_diagnostics = list(view.visible_diagnostics())
+
+    def safe_view_envelope() -> dict:
+        envelope = view.envelope(include_diagnostics=False)
+        envelope["diagnostic_summary"] = {
+            **diagnostic_summary(safe_diagnostics),
+            "blocking": sum(
+                1 for item in safe_diagnostics
+                if item in view.blocking_diagnostics),
+            "enforced": sum(
+                1 for item in safe_diagnostics
+                if item.enforcement_scope != "report"),
+        }
+        return envelope
+    if view.blocked:
+        result = {
+            "ok": False,
+            "schema_version": schema_version,
+            "status": "compiler_error",
+            "view": safe_view_envelope(),
+            "available_nodes": 0,
+            "available_edges": 0,
+            "returned_nodes": 0,
+            "returned_edges": 0,
+            "nodes": [],
+            "tree_edges": [],
+            "back_edges": [],
+            "cross_edges": [],
+            "truncated": False,
+            "next_cursor": None,
+            "completeness": "blocked",
+            "next_actions": [
+                "Run lint and repair blocking identity/source diagnostics."
+            ],
+        }
+        if _json_bytes(result) > byte_limit:
+            raise ValueError(
+                "max_bytes is too small for the Trace error envelope")
+        return result
     canonical_anchors = _resolve_anchors(
         compiled,
         view,
@@ -220,7 +257,10 @@ def _build_trace(
     )
 
     request_hash = _digest_json({
-        "trace_contract": TRACE_CONTRACT_VERSION,
+        "trace_contract": (
+            EXPLICIT_EDGE_TRACE_CONTRACT_VERSION
+            if compiled.workspace.explicit_edges_enabled
+            else TRACE_CONTRACT_VERSION),
         "schema_version": schema_version,
         "source_fingerprint": view.context.source_fingerprint,
         "view_id": view.view_id,
@@ -249,6 +289,7 @@ def _build_trace(
         direction=normalized_direction,
         relations=relation_filter,
         max_depth=depth_limit,
+        readable_explicit_edge_ids=readable_explicit_edge_ids,
     )
     if node_offset > len(nodes) or edge_offset > len(edges):
         raise TraceCursorError(
@@ -286,14 +327,11 @@ def _build_trace(
             "schema_version": schema_version,
             "status": "ok",
             "view": (
-                view.envelope(include_diagnostics=False)
+                safe_view_envelope()
                 if enforced else view.metadata()),
             "diagnostic_summary": (
-                view.envelope(
-                    include_diagnostics=False,
-                    include_quarantined=False,
-                )["diagnostic_summary"]
-                if enforced else view.diagnostic_summary()),
+                safe_view_envelope()["diagnostic_summary"]
+                if enforced else diagnostic_summary(safe_diagnostics)),
             "anchors": list(canonical_anchors),
             "direction": normalized_direction,
             "relations": list(relation_filter),
@@ -319,10 +357,19 @@ def _build_trace(
             "next_cursor": next_cursor,
             "completeness": "partial" if has_more else "complete",
             "boundary": (
-                "Trace reports explicit source relations and a deterministic "
-                "BFS projection. Connectivity is not proof that a natural-"
-                "language conclusion is true; inspect evidence before relying "
-                "on any declaration or edge."
+                (
+                    "Trace reports legacy node relations plus active, resolved "
+                    "first-class explicit Edges and a deterministic BFS projection. "
+                    "Connectivity is not proof. Source is runtime authority; review "
+                    "and audit state are not compiled non-bypassable authorization."
+                )
+                if compiled.workspace.explicit_edges_enabled else
+                (
+                    "Trace reports explicit source relations and a deterministic "
+                    "BFS projection. Connectivity is not proof that a natural-"
+                    "language conclusion is true; inspect evidence before relying "
+                    "on any declaration or edge."
+                )
             ),
             "next_actions": [
                 "Continue next_cursor with the same anchors, direction, "
@@ -469,6 +516,7 @@ def _bfs_trace(
     direction: str,
     relations: Tuple[str, ...],
     max_depth: int,
+    readable_explicit_edge_ids: set,
 ) -> Tuple[List[dict], List[dict]]:
     relation_filter = set(relations)
     depth = {anchor: 0 for anchor in anchors}
@@ -483,11 +531,30 @@ def _bfs_trace(
         node_id = queue.popleft()
         if depth[node_id] >= max_depth:
             continue
-        for traversal_direction, edge, neighbor_id in _adjacent_edges(
-            compiled, node_id, direction=direction):
-            if edge.edge_id in seen_edges:
+        for traversal_direction, edge_group, neighbor_id in _adjacent_edges(
+            compiled,
+            node_id,
+            direction=direction,
+            readable_explicit_edge_ids=readable_explicit_edge_ids,
+        ):
+            resolved_group = [
+                edge for edge in edge_group
+                if edge.status == "resolved" and edge.target_id is not None
+            ]
+            if not resolved_group:
                 continue
-            if edge.status != "resolved" or edge.target_id is None:
+            edge = next(
+                (item for item in resolved_group
+                 if getattr(item, "origin", "") == "explicit_edge"),
+                resolved_group[0],
+            )
+            triple = (edge.source_id, edge.relation, edge.target_id)
+            seen_key = (
+                triple
+                if compiled.workspace.explicit_edges_enabled
+                else edge.edge_id
+            )
+            if seen_key in seen_edges:
                 continue
             if relation_filter and edge.relation not in relation_filter:
                 continue
@@ -495,7 +562,7 @@ def _bfs_trace(
                     or edge.target_id not in visible_by_id
                     or neighbor_id not in visible_by_id):
                 continue
-            seen_edges.add(edge.edge_id)
+            seen_edges.add(seen_key)
             if neighbor_id not in depth:
                 depth[neighbor_id] = depth[node_id] + 1
                 parent[neighbor_id] = node_id
@@ -516,8 +583,32 @@ def _bfs_trace(
                 "traversal_direction": traversal_direction,
                 "classification": classification,
                 "cycle": classification == "back",
-                "provenance": "explicit",
+                "provenance": (
+                    getattr(edge, "origin", "legacy_node_relation")
+                    if compiled.workspace.explicit_edges_enabled else "explicit"),
             })
+            if compiled.workspace.explicit_edges_enabled:
+                origins = sorted(
+                    resolved_group,
+                    key=lambda item: (
+                        getattr(item, "origin", "legacy_node_relation"),
+                        item.edge_id,
+                    ),
+                )
+                edges[-1].update({
+                    "origin_ids": [item.edge_id for item in origins],
+                    "provenance": [
+                        getattr(item, "origin", "legacy_node_relation")
+                        for item in origins
+                    ],
+                })
+            if getattr(edge, "origin", "") == "explicit_edge":
+                edges[-1].update({
+                    "explicit_edge_id": edge.edge_id,
+                    "relation_stability": edge.relation_stability,
+                    "lifecycle": dict(edge.lifecycle),
+                    "evidence": dict(edge.evidence),
+                })
 
     nodes = []
     for sequence, node_id in enumerate(node_ids):
@@ -546,23 +637,57 @@ def _adjacent_edges(
     node_id: str,
     *,
     direction: str,
-) -> List[Tuple[str, CompiledEdge, str]]:
+    readable_explicit_edge_ids: set,
+) -> list:
     adjacent = []
     if direction in {"outgoing", "both"}:
         adjacent.extend(
             ("outgoing", edge, str(edge.target_id or ""))
             for edge in compiled.outgoing.get(node_id, ())
         )
+        adjacent.extend(
+            ("outgoing", edge, str(edge.target_id or ""))
+            for edge in compiled.explicit_outgoing.get(node_id, ())
+            if edge.edge_id in readable_explicit_edge_ids
+        )
     if direction in {"incoming", "both"}:
         adjacent.extend(
             ("incoming", edge, edge.source_id)
             for edge in compiled.incoming.get(node_id, ())
         )
-    return sorted(adjacent, key=lambda item: (
+        adjacent.extend(
+            ("incoming", edge, str(edge.source_id or ""))
+            for edge in compiled.explicit_incoming.get(node_id, ())
+            if edge.edge_id in readable_explicit_edge_ids
+        )
+    if not compiled.workspace.explicit_edges_enabled:
+        return sorted(
+            [
+                (traversal_direction, (edge,), neighbor_id)
+                for traversal_direction, edge, neighbor_id in adjacent
+            ],
+            key=lambda item: (
+                item[0], item[1][0].relation, item[2], item[1][0].edge_id),
+        )
+    grouped = {}
+    for traversal_direction, edge, neighbor_id in adjacent:
+        key = (
+            traversal_direction,
+            edge.source_id,
+            edge.relation,
+            edge.target_id or edge.target_ref,
+            neighbor_id,
+        )
+        grouped.setdefault(key, []).append(edge)
+    coalesced = [
+        (key[0], tuple(values), key[4])
+        for key, values in grouped.items()
+    ]
+    return sorted(coalesced, key=lambda item: (
         item[0],
-        item[1].relation,
+        item[1][0].relation,
         item[2],
-        item[1].edge_id,
+        tuple(sorted(edge.edge_id for edge in item[1])),
     ))
 
 

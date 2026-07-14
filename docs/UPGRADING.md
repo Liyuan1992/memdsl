@@ -1,5 +1,26 @@
 # Upgrading to memdsl 0.8
 
+## 0.8 candidate to 0.9.0.dev0 experimental Edge line
+
+No automatic migration is performed. Existing v1/v2 workspaces retain exact
+0.8 semantics. To experiment with first-class Edges, create a branch, change
+the manifest to `memdsl.workspace.v3`, retain the explicit linking/enforcement
+objects, and add:
+
+```json
+"features": {"explicit_edges": "experimental-v1"}
+```
+
+Author new records in `edges.mem` or `*.edges.mem`; do not rewrite legacy node
+relations or approved history. Duplicate triples coexist and Trace coalesces
+them while retaining all origins. Explicit `supersedes` is graph-only and does
+not replace legacy node authority.
+
+Rollback requires restoring a v1/v2 manifest and removing the v3 Edge source
+from that branch, or appending reviewed lifecycle events before returning to a
+v3 state. Review/audit logs are preserved. Old 0.8 runtimes fail closed on the
+v3 manifest rather than silently ignoring Edge semantics.
+
 Release target: memdsl 0.8.0, 2026-07-14. The previous published baseline is
 0.6.0; 0.7.0 was not separately published.
 

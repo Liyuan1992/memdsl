@@ -16,6 +16,14 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 RUNTIME_ROLES = frozenset({
     "symbol", "constraint", "guidance", "assertion", "question",
 })
+RESERVED_EDGE_KINDS = frozenset({
+    "relation_edge", "explicit_edge", "relation_edge_event", "explicit_edge_event",
+})
+RESERVED_EDGE_CAPABILITIES = frozenset({
+    "relation_edge", "explicit_edge", "relation_edge_event",
+    "explicit_edge_event", "edge_lifecycle",
+})
+EDGE_RELATION_STABILITIES = frozenset({"stable", "experimental", "extension"})
 
 UNIVERSAL_FIELDS = frozenset({
     "subject", "claim", "evidence", "scope", "confidence", "lifecycle",
@@ -26,9 +34,12 @@ UNIVERSAL_FIELDS = frozenset({
 WORKSPACE_MANIFEST = "memdsl.json"
 WORKSPACE_SCHEMA_VERSION = "memdsl.workspace.v1"
 WORKSPACE_SCHEMA_VERSION_V2 = "memdsl.workspace.v2"
+WORKSPACE_SCHEMA_VERSION_V3 = "memdsl.workspace.v3"
+EXPLICIT_EDGES_FEATURE = "experimental-v1"
 WORKSPACE_SCHEMA_VERSIONS = frozenset({
     WORKSPACE_SCHEMA_VERSION,
     WORKSPACE_SCHEMA_VERSION_V2,
+    WORKSPACE_SCHEMA_VERSION_V3,
 })
 LINKING_VISIBILITIES = frozenset({"report", "strict"})
 ENFORCEMENT_MODES = frozenset({"report", "quarantine", "strict"})
@@ -101,6 +112,16 @@ class TypeDescriptor:
         if self.role_map and not self.role_field:
             raise SchemaError(
                 f"type {self.name!r} defines role_map without role_field")
+        if self.name in RESERVED_EDGE_KINDS:
+            raise SchemaError(
+                f"type name {self.name!r} is reserved for the core explicit Edge contract")
+        if (
+            self.capabilities & RESERVED_EDGE_CAPABILITIES
+            and "auto_approvable" in self.capabilities
+        ):
+            raise SchemaError(
+                f"type {self.name!r} cannot combine explicit Edge capability "
+                "with auto_approvable")
 
     def role_for(self, fields: Mapping[str, object]) -> str:
         if self.role_field:
@@ -154,16 +175,63 @@ class TypeDescriptor:
         }
 
 
+@dataclass(frozen=True)
+class EdgeRelationDescriptor:
+    """Public structural vocabulary entry for one explicit Edge relation."""
+
+    name: str
+    stability: str = "extension"
+    description: str = ""
+    source: str = "<workspace>"
+
+    def __post_init__(self) -> None:
+        if not str(self.name or "").strip():
+            raise SchemaError("edge relation name cannot be empty")
+        if self.stability not in EDGE_RELATION_STABILITIES:
+            raise SchemaError(
+                f"edge relation {self.name!r} stability must be one of "
+                f"{sorted(EDGE_RELATION_STABILITIES)!r}")
+
+    def as_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "stability": self.stability,
+            "description": self.description,
+            "source": self.source,
+        }
+
+
+def standard_edge_relation_descriptors() -> List[EdgeRelationDescriptor]:
+    """Pilot-supported minimum; lower-evidence relations remain extensions."""
+    descriptions = {
+        "supports": "Source evidence strengthens or corroborates the target.",
+        "depends_on": "The source depends on the target remaining available or true.",
+        "supersedes": "The source Edge records replacement intent without Phase 6 node authority.",
+        "contradicts": "The source and target cannot both be accepted without review.",
+    }
+    return [
+        EdgeRelationDescriptor(
+            name=name,
+            stability="experimental",
+            description=descriptions[name],
+            source="<builtin:memdsl.explicit-edge@1>",
+        )
+        for name in ("supports", "depends_on", "supersedes", "contradicts")
+    ]
+
+
 class TypeRegistry:
     """Registry of built-in and workspace-defined memory types."""
 
     def __init__(self) -> None:
         self._types: Dict[str, TypeDescriptor] = {}
+        self._edge_relations: Dict[str, EdgeRelationDescriptor] = {}
         self.schema_files: List[str] = []
         self.manifest_files: List[str] = []
         self.workspace_schema_version = WORKSPACE_SCHEMA_VERSION
         self.linking_visibility = "legacy"
         self.enforcement_mode = "legacy"
+        self.explicit_edges_enabled = False
 
     def register(self, descriptor: TypeDescriptor, *, replace: bool = False) -> None:
         name = str(descriptor.name or "").strip()
@@ -186,6 +254,27 @@ class TypeRegistry:
     def descriptors(self) -> List[TypeDescriptor]:
         return [self._types[name] for name in self.names()]
 
+    def register_edge_relation(
+        self, descriptor: EdgeRelationDescriptor, *, replace: bool = False,
+    ) -> None:
+        name = str(descriptor.name or "").strip()
+        if name in self._edge_relations and not replace:
+            previous = self._edge_relations[name]
+            if previous == descriptor:
+                return
+            raise SchemaError(
+                f"edge relation {name!r} is already defined by {previous.source}")
+        self._edge_relations[name] = descriptor
+
+    def resolve_edge_relation(self, name: str) -> Optional[EdgeRelationDescriptor]:
+        return self._edge_relations.get(str(name or ""))
+
+    def edge_relation_names(self) -> List[str]:
+        return sorted(self._edge_relations)
+
+    def edge_relation_descriptors(self) -> List[EdgeRelationDescriptor]:
+        return [self._edge_relations[name] for name in self.edge_relation_names()]
+
     def load_schema(self, path: str) -> List[TypeDescriptor]:
         absolute = os.path.abspath(path)
         try:
@@ -204,9 +293,16 @@ class TypeRegistry:
             raw_schema_version.strip()
             if isinstance(raw_schema_version, str) else "")
         raw_types = payload.get("types")
-        if not schema_name or not schema_version or not isinstance(raw_types, dict):
+        raw_relations = payload.get("relations", {})
+        if (
+            not schema_name
+            or not schema_version
+            or not isinstance(raw_types, dict)
+            or not isinstance(raw_relations, dict)
+        ):
             raise SchemaError(
-                f"{absolute}: schema requires name, version, and object-valued types")
+                f"{absolute}: schema requires name, version, and object-valued "
+                "types/relations")
         loaded: List[TypeDescriptor] = []
         for local_name, raw in raw_types.items():
             if not isinstance(raw, dict):
@@ -261,6 +357,26 @@ class TypeRegistry:
             )
             self.register(descriptor)
             loaded.append(descriptor)
+        for local_name, raw in raw_relations.items():
+            if not isinstance(raw, dict):
+                raise SchemaError(
+                    f"{absolute}: relation {local_name!r} must be an object")
+            local = str(local_name).strip()
+            if not local:
+                raise SchemaError(f"{absolute}: edge relation name cannot be empty")
+            full_name = local if "." in local else f"{schema_name}.{local}"
+            stability = raw.get("stability", "extension")
+            description = raw.get("description", "")
+            if not isinstance(stability, str) or not isinstance(description, str):
+                raise SchemaError(
+                    f"{absolute}: relation {full_name!r} stability and description "
+                    "must be strings")
+            self.register_edge_relation(EdgeRelationDescriptor(
+                name=full_name,
+                stability=stability.strip(),
+                description=description.strip(),
+                source=absolute,
+            ))
         if absolute not in self.schema_files:
             self.schema_files.append(absolute)
         return loaded
@@ -270,6 +386,8 @@ class TypeRegistry:
         registry = cls()
         for descriptor in standard_type_descriptors():
             registry.register(descriptor)
+        for descriptor in standard_edge_relation_descriptors():
+            registry.register_edge_relation(descriptor)
         return registry
 
 
@@ -380,7 +498,7 @@ def registry_for_paths(paths: Iterable[str]) -> TypeRegistry:
         manifest = os.path.join(root, WORKSPACE_MANIFEST)
         if os.path.isfile(manifest) and manifest not in manifests:
             manifests.append(manifest)
-    manifest_contract: Optional[Tuple[str, str, str]] = None
+    manifest_contract: Optional[Tuple[str, str, str, bool]] = None
     for manifest in sorted(manifests):
         try:
             with open(manifest, "r", encoding="utf-8") as handle:
@@ -397,7 +515,7 @@ def registry_for_paths(paths: Iterable[str]) -> TypeRegistry:
                 f"{manifest}: schema_version must be one of "
                 f"{sorted(WORKSPACE_SCHEMA_VERSIONS)!r}")
         if manifest_version == WORKSPACE_SCHEMA_VERSION:
-            forbidden = sorted(set(payload) & {"linking", "enforcement"})
+            forbidden = sorted(set(payload) & {"linking", "enforcement", "features"})
             if forbidden:
                 raise SchemaError(
                     f"{manifest}: memdsl.workspace.v1 cannot declare "
@@ -405,13 +523,18 @@ def registry_for_paths(paths: Iterable[str]) -> TypeRegistry:
                     "memdsl.workspace.v2 for visibility/enforcement semantics")
             linking_visibility = "legacy"
             enforcement_mode = "legacy"
+            explicit_edges_enabled = False
         else:
+            allowed_fields = {
+                "schema_version", "schemas", "linking", "enforcement",
+            }
+            if manifest_version == WORKSPACE_SCHEMA_VERSION_V3:
+                allowed_fields.add("features")
             unknown = sorted(
-                set(payload) - {
-                    "schema_version", "schemas", "linking", "enforcement"})
+                set(payload) - allowed_fields)
             if unknown:
                 raise SchemaError(
-                    f"{manifest}: memdsl.workspace.v2 has unknown field(s): "
+                    f"{manifest}: {manifest_version} has unknown field(s): "
                     f"{', '.join(unknown)}")
             linking = payload.get("linking")
             if not isinstance(linking, dict):
@@ -440,7 +563,28 @@ def registry_for_paths(paths: Iterable[str]) -> TypeRegistry:
                 raise SchemaError(
                     f"{manifest}: enforcement.mode must be 'report', "
                     "'quarantine', or 'strict'")
-        contract = (manifest_version, linking_visibility, enforcement_mode)
+            explicit_edges_enabled = False
+            if manifest_version == WORKSPACE_SCHEMA_VERSION_V3:
+                features = payload.get("features")
+                if not isinstance(features, dict):
+                    raise SchemaError(
+                        f"{manifest}: memdsl.workspace.v3 requires object-valued features")
+                unknown_features = sorted(set(features) - {"explicit_edges"})
+                if unknown_features:
+                    raise SchemaError(
+                        f"{manifest}: features has unknown field(s): "
+                        f"{', '.join(unknown_features)}")
+                if features.get("explicit_edges") != EXPLICIT_EDGES_FEATURE:
+                    raise SchemaError(
+                        f"{manifest}: features.explicit_edges must be "
+                        f"{EXPLICIT_EDGES_FEATURE!r}")
+                explicit_edges_enabled = True
+        contract = (
+            manifest_version,
+            linking_visibility,
+            enforcement_mode,
+            explicit_edges_enabled,
+        )
         if manifest_contract is not None and manifest_contract != contract:
             raise SchemaError(
                 f"{manifest}: workspace manifests disagree on schema/linking/"
@@ -450,6 +594,7 @@ def registry_for_paths(paths: Iterable[str]) -> TypeRegistry:
         registry.workspace_schema_version = manifest_version
         registry.linking_visibility = linking_visibility
         registry.enforcement_mode = enforcement_mode
+        registry.explicit_edges_enabled = explicit_edges_enabled
         registry.manifest_files.append(os.path.abspath(manifest))
         schemas = _strings(payload.get("schemas", []), f"{manifest}.schemas")
         base = os.path.dirname(manifest)

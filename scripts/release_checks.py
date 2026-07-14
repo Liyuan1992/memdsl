@@ -56,6 +56,10 @@ FORBIDDEN_SUFFIXES = {
     ".pfx",
     ".sqlite",
     ".sqlite3",
+    ".ods",
+    ".xls",
+    ".xlsm",
+    ".xlsx",
 }
 
 REQUIRED_PAPER_MEMBER_SUFFIXES = {

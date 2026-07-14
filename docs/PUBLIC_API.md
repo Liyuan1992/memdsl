@@ -606,3 +606,71 @@ new query/list/explain/check/Catalog/Trace v2 schemas. These v2 meanings are
 not retrofitted into v1 fields. Rollback is changing enforcement to `report`;
 Source, compiler diagnostics, proposals, review history, and audit history do
 not need to be rewritten.
+
+## Experimental 0.9 explicit Edge API
+
+This section is additive and requires a `memdsl.workspace.v3` manifest with
+`features.explicit_edges="experimental-v1"`. v1/v2 APIs and serialized
+envelopes remain the frozen 0.8 contract.
+
+Python exports:
+
+```python
+from memdsl import (
+    EdgeLifecycleEvent,
+    EdgeRelationDescriptor,
+    ExplicitEdge,
+    build_edge_transition_source,
+    build_explicit_edge_catalog,
+    confirm_edge_proposal,
+    explain_explicit_edge,
+    propose_edge_transition,
+)
+```
+
+`ExplicitEdge.id` is canonical `relation_edge:<name>` for both
+`relation_edge` and `explicit_edge` source spellings. Compiled Edge objects
+separate `record_id`, `declared_by_id`, `source_id`, and `target_id`.
+
+`build_explicit_edge_catalog()` and `explain_explicit_edge()` accept a
+workspace/compiled workspace or a `ResolvedView`. They apply record + source +
+target readability before returning ids, counts, evidence, lifecycle events,
+or source locations. Pending review files are never loaded.
+
+`build_edge_transition_source()` creates one append-only confirm/dispute/
+retract/supersede event. `propose_edge_transition()` queues it.
+`confirm_edge_proposal()` is the human confirmation wrapper and requires an
+`edges.mem` or `*.edges.mem` target; it revalidates in that final document's
+module/use context. Calling generic `ReviewStore.approve()` for an Edge without
+target-context validation returns `edge_target_context_required`.
+
+CLI:
+
+```console
+memdsl edge list <workspace> [--include-inactive] [--relation NAME] [--json]
+memdsl edge show <workspace> relation_edge:graph.alpha_supports_beta [--json]
+memdsl edge propose <workspace> --source-file proposal.mem
+memdsl edge confirm <workspace> <proposal-id> [--into edges.mem]
+memdsl edge dispute|retract <workspace> <edge-id> --evidence-source X --evidence-quote Y
+memdsl edge supersede <workspace> <edge-id> --replacement <edge-id> --evidence-source X --evidence-quote Y
+```
+
+MCP deliberately adds no tool or scope. Existing surfaces are reused:
+
+- `memory_propose` queues Edge/event source and can never auto-approve it.
+- `memory_list(kind="relation_edge")` returns a bounded readable Edge list.
+- `memory_explain(id="relation_edge:...")` returns one readable Edge.
+- `memory_trace` coalesces duplicate legacy/explicit triples and returns all
+  origin ids/provenance on the experimental Trace envelope.
+
+The review hard floor is enforced through one reserved-capability predicate for
+`relation_edge`, `explicit_edge`, `relation_edge_event`,
+`explicit_edge_event`, and `edge_lifecycle`. A schema combining any of those
+with `auto_approvable` is invalid; a policy rule naming a reserved Edge kind is
+invalid. Both Edge spellings and both event spellings therefore queue even when
+a workspace policy and `write:auto` would otherwise select automatic approval.
+
+Authority limitation: these APIs do not create a non-bypassable authorization
+proof. Source remains authoritative, review/audit is not compiled into a grant
+ledger, and direct filesystem writes can bypass the workflow. See
+[DESIGN_explicit_edges_phase6.md](DESIGN_explicit_edges_phase6.md).

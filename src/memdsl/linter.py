@@ -40,12 +40,15 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 from memdsl.compiler import WorkspaceInput, ensure_compiled
-from memdsl.model import Declaration
+from memdsl.model import EDGE_LIFECYCLE_ACTIONS, Declaration
 
 STALE_STATE_DAYS = 180
 MODULE_MAX_DECLARATIONS = 50
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_EDGE_STATUSES = frozenset({
+    "active", "candidate", "disputed", "quarantined", "retracted", "superseded",
+})
 _GUARD_FIELDS = {
     "when_any", "deny_any", "deny_regex", "require_any", "require_regex",
 }
@@ -285,6 +288,167 @@ def lint(ws: WorkspaceInput, today: Optional[_dt.date] = None) -> List[Diagnosti
                         f"memory '{d.id}' access policy has unknown field(s): "
                         f"{', '.join(unknown_access)}",
                         d.file, d.line, d.id))
+
+    # First-class explicit Edges use a reserved core envelope rather than a
+    # workspace memory type. They require exact declaration ids and evidence
+    # even while candidate because every lifecycle transition is review-gated.
+    for edge in ws.explicit_edges:
+        allowed = {
+            "declared_by", "source", "target", "relation", "evidence", "lifecycle", "status",
+            "scope", "access_policy", "access",
+        }
+        for field_name in sorted(set(edge.fields) - allowed):
+            diags.append(Diagnostic(
+                "unknown_edge_field", "error",
+                f"explicit Edge '{edge.id}' does not allow field '{field_name}'",
+                edge.file, edge.line, edge.id))
+        for field_name, value in (
+            ("declared_by", edge.declared_by_ref),
+            ("source", edge.source_ref),
+            ("target", edge.target_ref),
+            ("relation", edge.relation),
+        ):
+            if not value:
+                diags.append(Diagnostic(
+                    f"missing_edge_{field_name}", "error",
+                    f"explicit Edge '{edge.id}' requires field '{field_name}'",
+                    edge.file, edge.line, edge.id))
+        for endpoint_name, endpoint in (
+            ("declared_by", edge.declared_by_ref),
+            ("source", edge.source_ref), ("target", edge.target_ref),
+        ):
+            if endpoint and ":" not in endpoint:
+                diags.append(Diagnostic(
+                    f"edge_{endpoint_name}_requires_full_id", "error",
+                    f"explicit Edge '{edge.id}' {endpoint_name} must be an exact "
+                    "full declaration id (type:name)",
+                    edge.file, edge.line, edge.id))
+        if edge.evidence is None:
+            diags.append(Diagnostic(
+                "missing_edge_evidence", "error",
+                f"explicit Edge '{edge.id}' requires an evidence block",
+                edge.file, edge.line, edge.id))
+        else:
+            for field_name in ("source", "quote"):
+                if not isinstance(edge.evidence.get(field_name), str) or not str(
+                        edge.evidence.get(field_name, "")):
+                    diags.append(Diagnostic(
+                        "invalid_edge_evidence", "error",
+                        f"explicit Edge '{edge.id}' evidence requires non-empty "
+                        f"'{field_name}'",
+                        edge.file, edge.line, edge.id))
+        if not isinstance(edge.fields.get("lifecycle"), dict):
+            diags.append(Diagnostic(
+                "invalid_edge_lifecycle", "error",
+                f"explicit Edge '{edge.id}' requires a lifecycle block",
+                edge.file, edge.line, edge.id))
+        if edge.status not in _EDGE_STATUSES:
+            diags.append(Diagnostic(
+                "invalid_edge_lifecycle", "error",
+                f"explicit Edge '{edge.id}' lifecycle status must be one of "
+                f"{', '.join(sorted(_EDGE_STATUSES))}",
+                edge.file, edge.line, edge.id))
+        raw_access = edge.fields.get(
+            "access_policy", edge.fields.get("access"))
+        if raw_access is not None:
+            if not isinstance(raw_access, dict):
+                diags.append(Diagnostic(
+                    "invalid_edge_access_policy", "error",
+                    f"explicit Edge '{edge.id}' access policy must be a block",
+                    edge.file, edge.line, edge.id))
+            else:
+                unknown_access = sorted(
+                    set(raw_access) - {"readers", "writers", "reviewers"})
+                invalid_access_values = [
+                    key for key, value in raw_access.items()
+                    if not isinstance(value, list)
+                    or any(not isinstance(item, str) for item in value)
+                ]
+                if unknown_access or invalid_access_values:
+                    details = sorted(set(unknown_access + invalid_access_values))
+                    diags.append(Diagnostic(
+                        "invalid_edge_access_policy", "error",
+                        f"explicit Edge '{edge.id}' has invalid access field(s): "
+                        f"{', '.join(details)}",
+                        edge.file, edge.line, edge.id))
+        if edge.relation and ws.registry.resolve_edge_relation(edge.relation) is None:
+            diags.append(Diagnostic(
+                "unknown_edge_relation", "error",
+                f"explicit Edge '{edge.id}' uses unregistered relation "
+                f"'{edge.relation}'",
+                edge.file, edge.line, edge.id))
+
+    seen_event_ids = set()
+    for event in ws.edge_events:
+        if event.id in seen_event_ids:
+            diags.append(Diagnostic(
+                "duplicate_edge_event_id", "error",
+                f"edge lifecycle event '{event.id}' is declared more than once",
+                event.file, event.line, event.id))
+        seen_event_ids.add(event.id)
+        allowed = {
+            "edge", "action", "event_at", "replacement", "evidence",
+            "lifecycle", "status",
+        }
+        for field_name in sorted(set(event.fields) - allowed):
+            diags.append(Diagnostic(
+                "unknown_edge_event_field", "error",
+                f"edge lifecycle event '{event.id}' does not allow field "
+                f"'{field_name}'",
+                event.file, event.line, event.id))
+        if not event.edge_ref:
+            diags.append(Diagnostic(
+                "missing_edge_event_target", "error",
+                f"edge lifecycle event '{event.id}' requires field 'edge'",
+                event.file, event.line, event.id))
+        if event.action not in EDGE_LIFECYCLE_ACTIONS:
+            diags.append(Diagnostic(
+                "invalid_edge_event_action", "error",
+                f"edge lifecycle event '{event.id}' action must be one of "
+                f"{', '.join(sorted(EDGE_LIFECYCLE_ACTIONS))}",
+                event.file, event.line, event.id))
+        if not event.event_at:
+            diags.append(Diagnostic(
+                "missing_edge_event_at", "error",
+                f"edge lifecycle event '{event.id}' requires event_at",
+                event.file, event.line, event.id))
+        else:
+            try:
+                _dt.datetime.fromisoformat(event.event_at.replace("Z", "+00:00"))
+            except ValueError:
+                diags.append(Diagnostic(
+                    "invalid_edge_event_at", "error",
+                    f"edge lifecycle event '{event.id}' event_at must be ISO-8601",
+                    event.file, event.line, event.id))
+        if event.evidence is None:
+            diags.append(Diagnostic(
+                "missing_edge_event_evidence", "error",
+                f"edge lifecycle event '{event.id}' requires evidence",
+                event.file, event.line, event.id))
+        else:
+            for field_name in ("source", "quote"):
+                if not isinstance(event.evidence.get(field_name), str) or not str(
+                        event.evidence.get(field_name, "")):
+                    diags.append(Diagnostic(
+                        "invalid_edge_event_evidence", "error",
+                        f"edge lifecycle event '{event.id}' evidence requires "
+                        f"non-empty '{field_name}'",
+                        event.file, event.line, event.id))
+        if not isinstance(event.fields.get("lifecycle"), dict):
+            diags.append(Diagnostic(
+                "invalid_edge_event_lifecycle", "error",
+                f"edge lifecycle event '{event.id}' requires a lifecycle block",
+                event.file, event.line, event.id))
+        if event.action == "supersede" and not event.replacement_ref:
+            diags.append(Diagnostic(
+                "missing_edge_replacement", "error",
+                f"edge lifecycle event '{event.id}' supersede requires replacement",
+                event.file, event.line, event.id))
+        if event.status != "active":
+            diags.append(Diagnostic(
+                "inactive_edge_event", "warning",
+                f"edge lifecycle event '{event.id}' is not active and has no effect",
+                event.file, event.line, event.id))
 
     # module size budget
     per_module = {}

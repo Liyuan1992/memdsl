@@ -18,7 +18,8 @@ from enum import Enum
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
-from memdsl.model import Declaration
+from memdsl.model import ReviewableSource
+from memdsl.schema import RESERVED_EDGE_CAPABILITIES, RESERVED_EDGE_KINDS
 
 
 POLICY_FILENAME = "policy.json"
@@ -268,7 +269,7 @@ class PolicyRule:
         normalized = _validate_match(self.match, rule_name=self.name)
         object.__setattr__(self, "match", normalized)
 
-    def matches(self, declaration: Declaration, context: ProposalContext) -> bool:
+    def matches(self, declaration: ReviewableSource, context: ProposalContext) -> bool:
         match = self.match
         if declaration.kind not in match["kind"]:
             return False
@@ -459,6 +460,10 @@ class ReviewPolicy:
         """Reject rule kinds that are not present in the current registry."""
         for rule in self.rules:
             for kind in rule.match["kind"]:
+                if kind in RESERVED_EDGE_KINDS:
+                    raise PolicyError(
+                        f"rule {rule.name!r} cannot auto-route reserved explicit "
+                        f"Edge kind {kind!r}; Phase 6 requires human review")
                 if registry.resolve(kind) is None:
                     raise PolicyError(
                         f"rule {rule.name!r} references unknown memory type {kind!r}")
@@ -486,7 +491,7 @@ class ReviewPolicy:
 
     def assess(
         self,
-        declaration: Declaration,
+        declaration: ReviewableSource,
         *,
         warnings_count: int,
         context: Optional[ProposalContext],
@@ -581,12 +586,12 @@ class ReviewPolicy:
             sample_bucket=bucket,
         )
 
-    def route(self, declaration: Declaration, **kwargs) -> RoutingAssessment:
+    def route(self, declaration: ReviewableSource, **kwargs) -> RoutingAssessment:
         """Compatibility spelling for callers that think in routes."""
         return self.assess(declaration, **kwargs)
 
 
-def declaration_content_hash(declaration: Declaration) -> str:
+def declaration_content_hash(declaration: ReviewableSource) -> str:
     """Hash normalized declaration content, independent of source formatting."""
     payload = {
         "kind": declaration.kind,
@@ -728,12 +733,14 @@ def verify_workspace_file_quote(
 
 
 def _floor_reasons(
-    declaration: Declaration,
+    declaration: ReviewableSource,
     warnings_count: int,
     context: Optional[ProposalContext],
     policy: ReviewPolicy,
 ) -> List[str]:
     reasons: List[str] = []
+    if requires_human_edge_review(declaration):
+        reasons.append("explicit_edge_human_review_required")
     if declaration.runtime_role != "assertion":
         reasons.append("runtime_role_not_assertion")
     if declaration.status != "candidate":
@@ -776,8 +783,16 @@ def _floor_reasons(
     return reasons
 
 
+def requires_human_edge_review(declaration: ReviewableSource) -> bool:
+    """Return the immutable Phase 6 floor for every reserved Edge capability."""
+    return any(
+        declaration.has_capability(capability)
+        for capability in RESERVED_EDGE_CAPABILITIES
+    )
+
+
 def _input_snapshot(
-    declaration: Declaration,
+    declaration: ReviewableSource,
     *,
     content_hash: str,
     warnings_count: int,

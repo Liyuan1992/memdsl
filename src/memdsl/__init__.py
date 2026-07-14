@@ -10,7 +10,12 @@ policies may auto-approve only narrowly scoped candidate assertions.
 """
 
 from memdsl.parser import parse_file, parse_text, ParseError
-from memdsl.model import Workspace, Declaration
+from memdsl.model import (
+    Declaration,
+    EdgeLifecycleEvent,
+    ExplicitEdge,
+    Workspace,
+)
 from memdsl.linter import lint
 from memdsl.query import (
     EVIDENCE_PACK_SCHEMA,
@@ -35,6 +40,15 @@ from memdsl.graph import (
     TraceAnchorError,
     TraceCursorError,
     trace_memory,
+)
+from memdsl.edge import (
+    EDGE_CATALOG_SCHEMA,
+    EDGE_EXPLAIN_SCHEMA,
+    build_edge_transition_source,
+    build_explicit_edge_catalog,
+    confirm_edge_proposal,
+    explain_explicit_edge,
+    propose_edge_transition,
 )
 from memdsl.policy import (
     AUTO_APPROVABLE_CAPABILITY,
@@ -64,7 +78,12 @@ from memdsl.review_reporting import (
     review_digest,
     review_stats,
 )
-from memdsl.schema import SchemaError, TypeDescriptor, TypeRegistry
+from memdsl.schema import (
+    EdgeRelationDescriptor,
+    SchemaError,
+    TypeDescriptor,
+    TypeRegistry,
+)
 from memdsl.serving import (
     CHECK_SCHEMA,
     EXPLAIN_SCHEMA,
@@ -84,7 +103,7 @@ from memdsl.view import (
     resolve_view,
 )
 
-__version__ = "0.8.0"
+__version__ = "0.9.0.dev0"
 
 __all__ = [
     "parse_file",
@@ -92,6 +111,8 @@ __all__ = [
     "ParseError",
     "Workspace",
     "Declaration",
+    "ExplicitEdge",
+    "EdgeLifecycleEvent",
     "lint",
     "build_evidence_pack",
     "build_resolved_evidence_pack",
@@ -104,6 +125,13 @@ __all__ = [
     "TraceAnchorError",
     "TraceCursorError",
     "trace_memory",
+    "EDGE_CATALOG_SCHEMA",
+    "EDGE_EXPLAIN_SCHEMA",
+    "build_explicit_edge_catalog",
+    "explain_explicit_edge",
+    "build_edge_transition_source",
+    "propose_edge_transition",
+    "confirm_edge_proposal",
     "CATALOG_SCHEMA",
     "CATALOG_SCHEMA_V2",
     "CatalogCursorError",
@@ -115,6 +143,7 @@ __all__ = [
     "SchemaError",
     "TypeDescriptor",
     "TypeRegistry",
+    "EdgeRelationDescriptor",
     "ViewContext",
     "ResolvedView",
     "RESOLVED_VIEW_SCHEMA",

@@ -1,4 +1,4 @@
-"""Release-candidate metadata and workflow assertions for 0.8.0."""
+"""Experimental next-minor metadata and inherited release-gate assertions."""
 
 from pathlib import Path
 import importlib.util
@@ -8,7 +8,7 @@ import memdsl
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.8.0"
+EXPECTED_VERSION = "0.9.0.dev0"
 
 
 def test_release_version_is_consistent_across_runtime_and_project_metadata() -> None:
@@ -17,7 +17,7 @@ def test_release_version_is_consistent_across_runtime_and_project_metadata() -> 
     assert match is not None
     assert match.group(1) == EXPECTED_VERSION
     assert memdsl.__version__ == EXPECTED_VERSION
-    assert f"## {EXPECTED_VERSION} - 2026-07-14" in (
+    assert f"## {EXPECTED_VERSION} - 2026-07-15" in (
         ROOT / "CHANGELOG.md"
     ).read_text(encoding="utf-8")
 
@@ -33,6 +33,7 @@ def test_ci_covers_core_mcp_security_and_artifact_release_gates() -> None:
     assert "test_phase_three_indexed_query_trace.py" in workflow
     assert "test_phase_four_use_dialect.py" in workflow
     assert "test_phase_five_quarantine_enforcement.py" in workflow
+    assert "test_phase_six_explicit_edges.py" in workflow
     assert "release_checks.py paper" in workflow
     assert "cffconvert --validate" in workflow
     assert "release_checks.py artifacts" in workflow
@@ -84,6 +85,7 @@ def test_artifact_member_privacy_rules_reject_runtime_and_private_inputs() -> No
         "memdsl-0.8.0/docs/launch_article_zh.md",
         "memdsl-0.8.0/.env.production",
         "memdsl-0.8.0/cache.sqlite3",
+        "memdsl-0.8.0/private-review.xlsx",
         "memdsl-0.8.0/id_ed25519",
     ):
         assert module._check_member_name(forbidden), forbidden

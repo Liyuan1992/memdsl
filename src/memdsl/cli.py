@@ -27,6 +27,12 @@ from memdsl.benchmark import (
     run_compliance_benchmark,
 )
 from memdsl.compliance import check_compliance
+from memdsl.edge import (
+    build_explicit_edge_catalog,
+    confirm_edge_proposal,
+    explain_explicit_edge,
+    propose_edge_transition,
+)
 from memdsl.compiler import compile_workspace
 from memdsl.graph import (
     TRACE_DEFAULT_MAX_BYTES,
@@ -209,6 +215,51 @@ def main(argv: List[str] = None) -> int:
     p_types.add_argument("paths", nargs="+", help=".mem files or directories")
     p_types.add_argument("--json", action="store_true", help="JSON output")
 
+    p_edge = sub.add_parser(
+        "edge", help="experimental first-class explicit Edge workflow")
+    edge_sub = p_edge.add_subparsers(dest="edge_action", required=True)
+
+    def _edge_common(p: argparse.ArgumentParser) -> None:
+        p.add_argument("paths", nargs="+", help=".mem files or directories")
+        p.add_argument("--staging",
+                       help="staging dir (default: <workspace>/.memdsl)")
+
+    edge_list = edge_sub.add_parser("list", help="list compiled explicit Edges")
+    _edge_common(edge_list)
+    edge_list.add_argument("--include-inactive", action="store_true")
+    edge_list.add_argument("--relation")
+    edge_list.add_argument("--json", action="store_true")
+
+    edge_show = edge_sub.add_parser("show", help="show one explicit Edge")
+    _edge_common(edge_show)
+    edge_show.add_argument("id", help="stable Edge id")
+    edge_show.add_argument("--json", action="store_true")
+
+    edge_propose = edge_sub.add_parser(
+        "propose", help="queue one explicit Edge or lifecycle event source file")
+    _edge_common(edge_propose)
+    edge_propose.add_argument("--source-file", required=True)
+    edge_propose.add_argument("--reason", default="")
+
+    edge_confirm = edge_sub.add_parser(
+        "confirm", help="human-confirm one pending Edge proposal")
+    _edge_common(edge_confirm)
+    edge_confirm.add_argument("id", help="proposal id")
+    edge_confirm.add_argument("--into")
+
+    for action in ("dispute", "retract", "supersede"):
+        edge_transition = edge_sub.add_parser(
+            action, help=f"queue an append-only Edge {action} event")
+        _edge_common(edge_transition)
+        edge_transition.add_argument("id", help="stable Edge id")
+        edge_transition.add_argument("--evidence-source", required=True)
+        edge_transition.add_argument("--evidence-quote", required=True)
+        edge_transition.add_argument("--reason", default="")
+        edge_transition.add_argument("--event-id", default="")
+        edge_transition.add_argument("--event-at", default="")
+        if action == "supersede":
+            edge_transition.add_argument("--replacement", required=True)
+
     p_check = sub.add_parser(
         "check", help="preflight a proposed action or draft against MUST rules")
     p_check.add_argument("paths", nargs="+", help=".mem files or directories")
@@ -312,8 +363,15 @@ def main(argv: List[str] = None) -> int:
             print(d.render())
         errors = sum(1 for d in diags if d.severity == "error")
         warnings = sum(1 for d in diags if d.severity == "warning")
-        print(f"\n{len(ws.declarations)} declarations, "
-              f"{errors} error(s), {warnings} warning(s)")
+        if ws.explicit_edges_enabled:
+            print(
+                f"\n{len(ws.declarations)} declarations, "
+                f"{len(ws.explicit_edges)} explicit Edge(s), "
+                f"{len(ws.edge_events)} Edge event(s), "
+                f"{errors} error(s), {warnings} warning(s)")
+        else:
+            print(f"\n{len(ws.declarations)} declarations, "
+                  f"{errors} error(s), {warnings} warning(s)")
         if has_errors(diags) or (args.strict and warnings):
             return 1
         return 0
@@ -476,6 +534,108 @@ def main(argv: List[str] = None) -> int:
               if args.json else render_trace_text(payload))
         return 0 if payload.get("ok", True) else 1
 
+    if args.command == "edge":
+        ws = _load(args.paths)
+        compiled = compile_workspace(ws, paths=args.paths)
+        if args.edge_action == "list":
+            try:
+                payload = build_explicit_edge_catalog(
+                    compiled,
+                    include_inactive=args.include_inactive,
+                    relation=args.relation,
+                )
+            except ValueError as exc:
+                print(f"invalid edge request: {exc}", file=sys.stderr)
+                return 2
+            if args.json:
+                print(json.dumps(payload, indent=2, ensure_ascii=False))
+            else:
+                for edge in payload["edges"]:
+                    print(
+                        f"{edge['id']}  [{edge['lifecycle']['status']}]  "
+                        f"{edge['source']} --{edge['relation']}--> {edge['target']}")
+                print(f"\n{payload['total']} explicit Edge(s)")
+            return 0
+        if args.edge_action == "show":
+            payload = explain_explicit_edge(compiled, args.id)
+            if args.json:
+                print(json.dumps(payload, indent=2, ensure_ascii=False))
+            elif payload.get("ok"):
+                edge = payload["edge"]
+                print(
+                    f"{edge['id']}\n  {edge['source']} --{edge['relation']}--> "
+                    f"{edge['target']}\n  lifecycle: "
+                    f"{json.dumps(edge['lifecycle'], ensure_ascii=False)}\n  "
+                    f"authoritative_graph: {edge['authoritative_graph']}")
+            else:
+                print(f"edge not found: {args.id}", file=sys.stderr)
+            return 0 if payload.get("ok") else 1
+
+        store = ReviewStore(staging_dir_for(args.paths, args.staging))
+        if args.edge_action == "propose":
+            try:
+                with open(args.source_file, "r", encoding="utf-8") as handle:
+                    source = handle.read()
+                policy = load_policy(store.staging_dir, registry=ws.registry)
+                result = store.submit(
+                    args.paths,
+                    source,
+                    reason=args.reason,
+                    client="memdsl-cli",
+                    policy=policy,
+                    context=None,
+                    write_auto_granted=False,
+                )
+            except (OSError, PolicyError, AuditLogError) as exc:
+                print(f"edge propose failed: {exc}", file=sys.stderr)
+                return 1
+            if not result.get("ok"):
+                print("edge propose failed: invalid", file=sys.stderr)
+                for error in result.get("errors", []):
+                    print(f"  error[{error['code']}] {error['message']}", file=sys.stderr)
+                return 1
+            print(
+                f"queued {result['proposal_id']}: {result['declaration_id']} "
+                f"({result.get('reason_codes', ['human_review_required'])[0]})")
+            return 0
+        if args.edge_action == "confirm":
+            into = args.into
+            if not into:
+                first = os.path.abspath(args.paths[0])
+                base = first if os.path.isdir(first) else os.path.dirname(first)
+                into = os.path.join(base, "edges.mem")
+            result = confirm_edge_proposal(store, args.id, ws, into)
+            if not result.get("ok"):
+                print(f"edge confirm failed: {result.get('status')}", file=sys.stderr)
+                return 1
+            print(
+                f"confirmed {result['proposal_id']}: {result['declaration_id']} "
+                f"-> {result['merged_into']}")
+            return 0
+        if args.edge_action in {"dispute", "retract", "supersede"}:
+            result = propose_edge_transition(
+                store,
+                args.paths,
+                args.id,
+                args.edge_action,
+                evidence_source=args.evidence_source,
+                evidence_quote=args.evidence_quote,
+                reason=args.reason,
+                client="memdsl-cli",
+                event_id=args.event_id,
+                event_at=args.event_at,
+                replacement=getattr(args, "replacement", ""),
+            )
+            if not result.get("ok"):
+                print(f"edge {args.edge_action} failed: invalid", file=sys.stderr)
+                for error in result.get("errors", []):
+                    print(f"  error[{error['code']}] {error['message']}", file=sys.stderr)
+                return 1
+            print(
+                f"queued {args.edge_action} {result['proposal_id']}: "
+                f"{result['declaration_id']}")
+            return 0
+
     if args.command == "explain":
         ws = _load(args.paths)
         compiled = compile_workspace(ws, paths=args.paths)
@@ -503,11 +663,19 @@ def main(argv: List[str] = None) -> int:
         ws = _load(args.paths)
         items = [descriptor.as_dict() for descriptor in ws.registry.descriptors()]
         if args.json:
-            print(json.dumps({
-                "schema_version": "memdsl.types.v1",
+            payload = {
+                "schema_version": (
+                    "memdsl.types.explicit-edge.experimental.v1"
+                    if ws.explicit_edges_enabled else "memdsl.types.v1"),
                 "schema_files": list(ws.registry.schema_files),
                 "types": items,
-            }, indent=2, ensure_ascii=False))
+            }
+            if ws.explicit_edges_enabled:
+                payload["edge_relations"] = [
+                    descriptor.as_dict()
+                    for descriptor in ws.registry.edge_relation_descriptors()
+                ]
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
         else:
             for item in items:
                 required = ",".join(item["required_fields"]) or "-"
@@ -515,6 +683,12 @@ def main(argv: List[str] = None) -> int:
                 print(
                     f"{item['name']}  role={item['runtime_role']}  "
                     f"required={required}  capabilities={capabilities}")
+            if ws.explicit_edges_enabled:
+                print("\nexplicit Edge relations:")
+                for relation in ws.registry.edge_relation_descriptors():
+                    print(
+                        f"{relation.name}  stability={relation.stability}  "
+                        f"source={relation.source}")
         return 0
 
     if args.command == "check":

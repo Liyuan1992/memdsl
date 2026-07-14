@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.0.dev0 - 2026-07-15
+
+- Experimental Phase 6 first-class explicit Edge source/model contract with
+  stable identities, evidence, lifecycle events, extensible relation registry,
+  compiled indexes, Trace provenance, CLI/MCP proposal surfaces, and an
+  immutable human-review floor.
+- The 0.8.0 authority contract remains frozen: legacy node relations keep their
+  existing precedence, explicit `supersedes` does not suppress declarations,
+  and review/audit state is not compiled as a digest-bound authority ledger.
+- Anonymous single-principal exploratory Pilot result: ADJUST. High-evidence
+  built-ins are `supports`, `depends_on`, `supersedes`, and `contradicts`;
+  lower-evidence relations such as `refines` remain experimental extensions.
+
 ## 0.8.0 - 2026-07-14
 
 - Skipped an unpublished 0.7.0 and integrated the verified Phase -1 through

@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
-from memdsl.parser import Document, RawDeclaration, parse_file
+from memdsl.parser import (
+    EDGE_EVENT_KINDS,
+    EXPLICIT_EDGE_KINDS,
+    Document,
+    parse_file,
+)
 from memdsl.schema import (
+    SchemaError,
     WORKSPACE_SCHEMA_VERSION,
     TypeDescriptor,
     TypeRegistry,
@@ -23,6 +29,10 @@ RELATION_FIELDS = {
 
 ACTIVE_STATUSES = {"active"}
 EXCLUDED_STATUSES = {"superseded", "retracted", "archived"}
+EDGE_INACTIVE_STATUSES = {
+    "candidate", "disputed", "quarantined", "retracted", "superseded",
+}
+EDGE_LIFECYCLE_ACTIONS = frozenset({"confirm", "dispute", "retract", "supersede"})
 
 
 @dataclass
@@ -162,14 +172,192 @@ class Declaration:
 
 
 @dataclass
+class ExplicitEdge:
+    """A stable, evidence-bearing relation between two declaration ids.
+
+    ``relation_edge`` and ``explicit_edge`` are accepted source spellings, but
+    both compile to the canonical identity ``relation_edge:<name>``.
+    """
+
+    name: str
+    fields: dict
+    file: str
+    line: int
+    module: Optional[str] = None
+    source_kind: str = "relation_edge"
+
+    @property
+    def id(self) -> str:
+        return f"relation_edge:{self.name}"
+
+    @property
+    def kind(self) -> str:
+        return "relation_edge"
+
+    @property
+    def source_ref(self) -> str:
+        return str(self.fields.get("source", ""))
+
+    @property
+    def declared_by_ref(self) -> str:
+        return str(self.fields.get("declared_by", ""))
+
+    @property
+    def target_ref(self) -> str:
+        return str(self.fields.get("target", ""))
+
+    @property
+    def relation(self) -> str:
+        return str(self.fields.get("relation", ""))
+
+    @property
+    def evidence(self) -> Optional[dict]:
+        value = self.fields.get("evidence")
+        return value if isinstance(value, dict) else None
+
+    @property
+    def lifecycle(self) -> dict:
+        value = self.fields.get("lifecycle")
+        result = dict(value) if isinstance(value, dict) else {}
+        if "status" not in result:
+            result["status"] = str(self.fields.get("status", "candidate"))
+        return result
+
+    @property
+    def status(self) -> str:
+        return str(self.lifecycle.get("status", "candidate"))
+
+    @property
+    def runtime_role(self) -> str:
+        return "edge"
+
+    @property
+    def capabilities(self) -> frozenset:
+        return frozenset({"explicit_edge", "relation_edge"})
+
+    def has_capability(self, name: str) -> bool:
+        return name in self.capabilities
+
+    @property
+    def scope(self) -> Optional[str]:
+        value = self.fields.get("scope")
+        return str(value) if value is not None else None
+
+    @property
+    def force(self) -> Optional[str]:
+        return None
+
+    @property
+    def access_policy(self) -> dict:
+        value = self.fields.get("access_policy", self.fields.get("access"))
+        return dict(value) if isinstance(value, dict) else {}
+
+    @property
+    def subject(self) -> Optional[str]:
+        return None
+
+    def relations(self) -> Dict[str, List[str]]:
+        return {}
+
+
+@dataclass
+class EdgeLifecycleEvent:
+    """Append-only confirm/dispute/retract/supersede event for one Edge."""
+
+    name: str
+    fields: dict
+    file: str
+    line: int
+    module: Optional[str] = None
+    source_kind: str = "relation_edge_event"
+
+    @property
+    def id(self) -> str:
+        return f"relation_edge_event:{self.name}"
+
+    @property
+    def kind(self) -> str:
+        return "relation_edge_event"
+
+    @property
+    def edge_ref(self) -> str:
+        return str(self.fields.get("edge", ""))
+
+    @property
+    def action(self) -> str:
+        return str(self.fields.get("action", ""))
+
+    @property
+    def event_at(self) -> str:
+        return str(self.fields.get("event_at", ""))
+
+    @property
+    def replacement_ref(self) -> str:
+        return str(self.fields.get("replacement", ""))
+
+    @property
+    def evidence(self) -> Optional[dict]:
+        value = self.fields.get("evidence")
+        return value if isinstance(value, dict) else None
+
+    @property
+    def lifecycle(self) -> dict:
+        value = self.fields.get("lifecycle")
+        result = dict(value) if isinstance(value, dict) else {}
+        if "status" not in result:
+            result["status"] = str(self.fields.get("status", "active"))
+        return result
+
+    @property
+    def status(self) -> str:
+        return str(self.lifecycle.get("status", "active"))
+
+    @property
+    def runtime_role(self) -> str:
+        return "edge_event"
+
+    @property
+    def capabilities(self) -> frozenset:
+        return frozenset({"explicit_edge", "relation_edge", "edge_lifecycle"})
+
+    def has_capability(self, name: str) -> bool:
+        return name in self.capabilities
+
+    @property
+    def scope(self) -> Optional[str]:
+        return None
+
+    @property
+    def force(self) -> Optional[str]:
+        return None
+
+    @property
+    def access_policy(self) -> dict:
+        return {}
+
+    @property
+    def subject(self) -> Optional[str]:
+        return None
+
+    def relations(self) -> Dict[str, List[str]]:
+        return {}
+
+
+ReviewableSource = Union[Declaration, ExplicitEdge, EdgeLifecycleEvent]
+
+
+@dataclass
 class Workspace:
     declarations: List[Declaration] = field(default_factory=list)
+    explicit_edges: List[ExplicitEdge] = field(default_factory=list)
+    edge_events: List[EdgeLifecycleEvent] = field(default_factory=list)
     files: List[str] = field(default_factory=list)
     registry: TypeRegistry = field(default_factory=TypeRegistry.standard, repr=False)
     documents: List[Document] = field(default_factory=list, repr=False)
     schema_version: str = WORKSPACE_SCHEMA_VERSION
     linking_visibility: str = "legacy"
     enforcement_mode: str = "legacy"
+    explicit_edges_enabled: bool = False
 
     # ---- construction ----
 
@@ -198,6 +386,7 @@ class Workspace:
             schema_version=resolved_registry.workspace_schema_version,
             linking_visibility=resolved_registry.linking_visibility,
             enforcement_mode=resolved_registry.enforcement_mode,
+            explicit_edges_enabled=resolved_registry.explicit_edges_enabled,
         )
         for path in path_list:
             if os.path.isdir(path):
@@ -211,6 +400,13 @@ class Workspace:
         return ws
 
     def add_document(self, doc: Document) -> None:
+        if (
+            (doc.explicit_edges or doc.edge_events)
+            and not self.explicit_edges_enabled
+        ):
+            raise SchemaError(
+                "first-class explicit Edge syntax requires memdsl.workspace.v3 "
+                "with features.explicit_edges='experimental-v1'")
         self.documents.append(doc)
         self.files.append(doc.file)
         module_statements = tuple(
@@ -223,6 +419,24 @@ class Workspace:
                             module_statements=module_statements,
                             type_descriptor=self.registry.resolve(raw.kind))
             )
+        for raw in doc.explicit_edges:
+            self.explicit_edges.append(ExplicitEdge(
+                name=raw.name,
+                fields=raw.fields,
+                file=raw.file,
+                line=raw.line,
+                module=raw.module,
+                source_kind=raw.kind,
+            ))
+        for raw in doc.edge_events:
+            self.edge_events.append(EdgeLifecycleEvent(
+                name=raw.name,
+                fields=raw.fields,
+                file=raw.file,
+                line=raw.line,
+                module=raw.module,
+                source_kind=raw.kind,
+            ))
 
     # ---- lookups ----
 
@@ -231,6 +445,19 @@ class Workspace:
             if d.id == decl_id or d.name == decl_id:
                 return d
         return None
+
+    def edge_by_id(self, edge_id: str) -> Optional[ExplicitEdge]:
+        reference = str(edge_id or "")
+        canonical = (
+            reference
+            if reference.startswith("relation_edge:")
+            else f"relation_edge:{reference.split(':', 1)[-1]}"
+        )
+        matches = [item for item in self.explicit_edges if item.id == canonical]
+        return matches[0] if len(matches) == 1 else None
+
+    def reviewable_sources(self) -> List[ReviewableSource]:
+        return list(self.declarations) + list(self.explicit_edges) + list(self.edge_events)
 
     def entities(self) -> List[Declaration]:
         return [d for d in self.declarations if d.runtime_role == "symbol"]

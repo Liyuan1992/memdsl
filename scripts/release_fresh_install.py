@@ -18,6 +18,7 @@ PAPER_FILES = {
     "LICENSE",
     "DOCUMENTATION_INDEX.md",
     "DESIGN_memory_source_compiled_view.md",
+    "DESIGN_explicit_edges_phase6.md",
     "PAPER_LICENSE.md",
     "PAPER_publication_readiness_audit.md",
     "PAPER_related_work_claim_ledger.md",
@@ -26,6 +27,9 @@ PAPER_FILES = {
     "baselines/PHASE_MINUS_ONE_SCALE_BASELINE.md",
     "baselines/phase_minus_one_0.6.0.json",
     "benchmarks/phase_minus_one_baseline.py",
+    "PUBLIC_API.md",
+    "SPEC.md",
+    "UPGRADING.md",
 }
 
 
@@ -101,6 +105,77 @@ async def main():
     ]
     assert counts == [11, 11, 11, 11]
     print(json.dumps({"stdio_tools": counts[0], "scope_denial": "ok", "v2": "ok"}))
+
+
+asyncio.run(main())
+'''
+
+
+EDGE_STDIO_PROBE = r'''
+import asyncio
+import json
+import sys
+
+from mcp import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
+
+
+def payload(result):
+    structured = getattr(result, "structuredContent", None)
+    if isinstance(structured, dict):
+        return structured
+    for item in getattr(result, "content", []):
+        text = getattr(item, "text", "")
+        if text:
+            return json.loads(text)
+    raise AssertionError("MCP result did not contain JSON")
+
+
+async def main():
+    workspace = sys.argv[1]
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "memdsl.mcp_server", "--workspace", workspace],
+    )
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as client:
+            await client.initialize()
+            tools = await client.list_tools()
+            names = {item.name for item in tools.tools}
+            assert len(names) == 11
+            assert not any(name.startswith("edge_") for name in names)
+            listed = payload(await client.call_tool(
+                "memory_list", {"kind": "relation_edge"}
+            ))
+            assert listed["total"] == 1
+            traced = payload(await client.call_tool(
+                "memory_trace", {"anchors": ["fact:graph.alpha"]}
+            ))
+            assert traced["available_edges"] == 1
+            proposed = payload(await client.call_tool(
+                "memory_propose",
+                {"source": """
+relation_edge graph.second_support {
+  declared_by: "entity:Reviewer"
+  source: "fact:graph.beta"
+  target: "fact:graph.alpha"
+  relation: supports
+  lifecycle { status: active }
+  evidence {
+    source: synthetic_fresh_install
+    quote: "Beta supports alpha in the fictional fresh-install fixture."
+  }
+}
+"""},
+            ))
+            assert proposed["status"] == "pending_review"
+            assert "explicit_edge_human_review_required" in proposed["reason_codes"]
+            print(json.dumps({
+                "edge_stdio_tools": len(names),
+                "edge_list": listed["total"],
+                "edge_trace": traced["available_edges"],
+                "edge_proposal": proposed["status"],
+            }))
 
 
 asyncio.run(main())
@@ -232,6 +307,73 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         _run(
             [str(python), "-c", STDIO_PROBE, str(workspace), str(enforced)],
+            cwd=temp_root,
+        )
+
+        edge_workspace = temp_root / "explicit-edge"
+        edge_workspace.mkdir()
+        (edge_workspace / "memdsl.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "memdsl.workspace.v3",
+                    "schemas": [],
+                    "linking": {"visibility": "report"},
+                    "enforcement": {"mode": "report"},
+                    "features": {"explicit_edges": "experimental-v1"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (edge_workspace / "memory.mem").write_text(
+            textwrap.dedent(
+                '''
+                module fictional.graph
+
+                entity Reviewer {
+                  canonical_name: "Fictional reviewer"
+                  status: active
+                }
+
+                fact graph.alpha {
+                  claim: "Synthetic alpha node."
+                  status: active
+                  evidence { source: synthetic_fresh_install quote: "Alpha." }
+                }
+
+                fact graph.beta {
+                  claim: "Synthetic beta node."
+                  status: active
+                  evidence { source: synthetic_fresh_install quote: "Beta." }
+                }
+
+                relation_edge graph.alpha_supports_beta {
+                  declared_by: "entity:Reviewer"
+                  source: "fact:graph.alpha"
+                  target: "fact:graph.beta"
+                  relation: supports
+                  lifecycle { status: active }
+                  evidence {
+                    source: synthetic_fresh_install
+                    quote: "Alpha supports beta in the fictional fresh-install fixture."
+                  }
+                }
+                '''
+            ).strip()
+            + "\n",
+            encoding="utf-8",
+        )
+        _run(
+            [str(python), "-m", "memdsl.cli", "edge", "list",
+             str(edge_workspace), "--json"],
+            cwd=temp_root,
+        )
+        _run(
+            [str(python), "-m", "memdsl.mcp_server", "--inspect", "-w",
+             str(edge_workspace)],
+            cwd=temp_root,
+        )
+        _run(
+            [str(python), "-c", EDGE_STDIO_PROBE, str(edge_workspace)],
             cwd=temp_root,
         )
         print(f"fresh_python={python}")
