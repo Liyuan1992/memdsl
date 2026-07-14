@@ -1,7 +1,7 @@
 # Memory DSL Specification
 
-Version: 0.6
-Status: reference specification for the `memdsl` v0.6 implementation
+Version: 0.8
+Status: reference specification for the `memdsl` v0.8 implementation
 Release date: 2026-07-14
 License: [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
 
@@ -12,8 +12,11 @@ long-term memory. Memory gets stable ids, evidence, scope, confidence,
 lifecycle, access policy, relations, diagnostics, and behavioral roles so an
 agent can read memory the way it reads code.
 
-Version 0.6 retains the two-layer type architecture introduced in 0.5 and
-adds lifecycle-safe provisional serving plus host-attested, risk-tiered review:
+Version 0.8 retains the two-layer type architecture introduced in 0.5 and the
+lifecycle-safe, host-attested review contract introduced in 0.6. It adds
+bounded Catalog/Trace navigation, deterministic compiled diagnostics and
+indexes, exact workspace-v2 visibility, and explicit opt-in ResolvedView
+enforcement.
 
 ```text
 core memory record     claim / evidence / scope / confidence / lifecycle /
@@ -39,9 +42,26 @@ newer; therefore the `mcp` extra is guarded by a
 `python_version >= "3.10"` dependency marker and `memdsl-mcp` is a
 Python 3.10+ surface. Python 3.9 deployments are core-only.
 
+### 1.2 Release classification
+
+The following are stable public 0.8 contracts: v1 compatibility and authority
+lanes, Catalog v1, Trace v1, indexed query/search-trace behavior, report
+diagnostic codes, workspace v2, exact `use`, the generic `dialect_mapping`
+capability, `ViewContext`/`ResolvedView`, and the explicit v2 read schemas.
+Map v1 remains supported for the entire 0.8 line and is not eligible for
+removal before 1.0.
+
+The operational quality of real-workspace quarantine/strict rollout,
+dialect-candidate learning, and host-attested principal integration is
+experimental and explicit opt-in. That label never weakens authorization,
+hard-rule completeness, authority, or repair-lane safety requirements.
+`CompiledWorkspace`, cache/index layouts, compiler contract strings,
+complexity constants, and synthetic timing numbers are implementation facts,
+not public API or performance SLAs.
+
 ## 2. Non-goals
 
-Version 0.6 deliberately does not attempt:
+Version 0.8 deliberately does not attempt:
 
 - Turing completeness, loops, functions, or arbitrary runtime computation.
 - Replacing databases, vector stores, or knowledge graphs.
@@ -54,6 +74,11 @@ Version 0.6 deliberately does not attempt:
   runtimes remain responsible for binding identities to it.
 - Pretending arbitrary natural-language constraints can be checked
   deterministically. Unexecutable constraints produce `needs_review`.
+- First-class reviewed edge syntax/lifecycle or inferred authoritative graph
+  edges. These remain deferred until published Trace usage supplies concrete
+  review and provenance evidence.
+- Cold-history storage, object stores, or incremental compiler semantics.
+  Synthetic cold-cost growth alone is not a production bottleneck contract.
 
 ## 3. Workspace and schema model
 
@@ -91,7 +116,7 @@ linking. `memdsl.workspace.v2` is an explicit visibility opt-in and requires:
 closed. This prevents an older runtime from silently ignoring visibility
 rules.
 
-Workspace v2 MAY additionally opt in to Phase 5 read enforcement:
+Workspace v2 MAY additionally opt in to v2 read enforcement:
 
 ```json
 {
@@ -260,7 +285,7 @@ confidence policies behind the same record contract.
 
 ### 4.4 Lifecycle
 
-Preferred v0.6 form:
+Preferred v0.8 form:
 
 ```mem
 lifecycle {
@@ -294,9 +319,11 @@ access_policy {
 }
 ```
 
-v0.6 validates and exposes access policy through Python, JSON, CLI, and MCP.
-The reference runtime does not claim to authenticate these identities; an
-embedding application must bind its principals to the policy.
+Version 0.8 validates and exposes access policy through Python, JSON, CLI, and
+MCP. In an explicitly enforced View it can filter against a trusted principal
+and exact roles supplied by the embedding host before aggregation. The runtime
+does not authenticate identities or accept principal self-assertion in MCP
+tool arguments; an embedding application must bind its principals to policy.
 
 ### 4.6 Relations
 
@@ -377,7 +404,7 @@ Capabilities recognized by the reference runtime include:
 | `enforceable` | Constraint may enter deterministic compliance |
 | `guardable` | Type may declare a `guard` block |
 | `exceptions_recommended` | Linter asks for explicit exceptions |
-| `auto_approvable` | Type explicitly permits policy consideration; the v0.6 safety floor still restricts automatic approval to candidate assertions |
+| `auto_approvable` | Type explicitly permits policy consideration; the safety floor still restricts automatic approval to candidate assertions |
 
 Unknown capabilities may be carried for external runtimes. Core behavior is
 only attached to capabilities the runtime understands.
@@ -402,7 +429,7 @@ Pre-v0.5 workspaces continue to load unchanged through
 | `open_issue` | question |
 
 Other previously reserved standard names also remain generic assertions.
-There is no implicit `User` symbol in v0.6; a workspace must declare every
+There is no implicit `User` symbol in v0.8; a workspace must declare every
 subject it references.
 
 ## 6. DSL grammar
@@ -423,7 +450,7 @@ list        := '[' (value (',' value)*)? ']'
 no loaded schema defines the type.
 
 Nested maps such as `evidence`, `lifecycle`, `access_policy`, `relations`,
-and `guard` are single-level blocks in v0.6.
+and `guard` are single-level blocks in v0.8.
 
 ## 7. Querying: EvidencePack
 
@@ -447,14 +474,15 @@ hits.
 Every item carries its id, type, runtime role, capabilities, evidence,
 lifecycle, confidence, and access policy.
 
-The stable JSON envelope remains `memdsl.evidence_pack.v1`. Version 0.6
-additively adds `provisional`; scored CONTEXT and PROVISIONAL entries expose
+The stable JSON envelope remains `memdsl.evidence_pack.v1`. The `provisional`
+field introduced in 0.6 remains additive in 0.8; scored CONTEXT and
+PROVISIONAL entries expose
 `score` and `matched_terms`. Every declaration item includes `status`,
 `runtime_role`, and lifecycle, and text rendering makes those fields visible.
 Hosts may add their own runtime projection fields, but must preserve the
 layers and declaration ids.
 
-The reference scorer remains lexical plus alias resolution, but Phase 3 uses
+The reference scorer remains lexical plus alias resolution, while 0.8 uses
 a deterministic inverted term index to select scoring candidates. The
 compatibility scorer, tie-break, authority lanes, active/provisional limits,
 global-constraint handling, and filter-hidden diagnostics remain unchanged.
@@ -495,7 +523,7 @@ declarations match, MISSING still reports that no active declaration matched;
 filter-hidden counts and wording likewise refer explicitly to active
 declarations.
 
-When no active scored declaration matches, Phase 3 may add pure-lexical
+When no active scored declaration matches, 0.8 may add pure-lexical
 vocabulary suggestions from active, unrestricted workspace symbols, aliases,
 types, and modules. Suggestions explain the query term, proposed phrase,
 category, reason, and any symbol ambiguity. They do not edit Source, create an
@@ -523,7 +551,7 @@ mappings do not route and do not enter the new suggestion vocabulary. If a
 phrase maps to multiple symbols, or conflicts with an existing active alias,
 lint reports `ambiguous_dialect_mapping` and the new mapping does not redirect.
 
-Negative mapping precedence is not defined in Phase 4. A non-positive
+Negative mapping precedence is not defined in 0.8. A non-positive
 `polarity` reports `unsupported_dialect_polarity` and has no routing effect.
 
 ### 7.3 Navigation: bounded Catalog, legacy memory map, and vocabulary
@@ -592,16 +620,16 @@ cursor binds source fingerprint, view id, anchors, direction, relation filter,
 depth, provisional visibility, schema, and Trace contract. Source/View changes
 return `cursor_stale`; request identity changes return `cursor_mismatch`.
 
-Trace v1 omits declarations with non-empty `access_policy` because Phase 3 has
-no trusted principal API. Provisional nodes are omitted unless explicitly
-requested and remain labeled provisional. Report mode has no quarantined nodes;
-Phase 5 owns enforcement and permission-aware quarantine metadata. Trace
+Trace v1 omits declarations with non-empty `access_policy`; only an explicitly
+enforced v2 View has a trusted-host principal input and permission-aware
+quarantine metadata. Provisional nodes are omitted unless explicitly requested
+and remain labeled provisional. Report mode has no quarantined nodes. Trace
 connectivity records what Source declares; it is not proof of a natural-
 language conclusion and is never a replacement for evidence or explain.
 
 ### 7.5 ResolvedView and opt-in quarantine enforcement
 
-Phase 5 makes `ViewContext`, `ResolvedView`, and `resolve_view()` public. The
+Version 0.8 makes `ViewContext`, `ResolvedView`, and `resolve_view()` public. The
 stable View schema is `memdsl.resolved_view.v1`; every readable declaration is
 classified as exactly one of:
 
@@ -730,7 +758,7 @@ in-place `status: superseded` rewrite.
 Compiler/link diagnostic codes are stable; human-readable messages may become
 clearer. `revision_cycle`, ambiguous/wrong-prefix/unknown relation targets, and
 duplicate ids are errors. `supersedes_fork` remains a warning in report mode;
-its explicit Phase 5 enforcement scope is defined in section 7.5 and is never a
+its explicit v2 enforcement scope is defined in section 7.5 and is never a
 legacy/report default.
 
 Duplicate ids remain visible as source occurrences in collection surfaces, but
@@ -746,7 +774,7 @@ the live workspace's `TypeRegistry`. A proposal using an unknown domain type
 or missing a schema-required field fails before staging.
 
 Pending proposals live under `.memdsl/proposals/` and are never served as
-memory. Version 0.6 adds deterministic routing after validation:
+memory. The deterministic routing contract introduced in 0.6 remains:
 
 | Result | Meaning |
 | --- | --- |
@@ -771,7 +799,7 @@ another verifier; verifier failure or absence can only route to a person.
 
 ### 10.2 Non-configurable safety floor
 
-Version 0.6 can automatically approve only a declaration that satisfies all
+Version 0.8 can automatically approve only a declaration that satisfies all
 of these conditions:
 
 - runtime role is `assertion`;

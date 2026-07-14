@@ -1,8 +1,8 @@
 import memdsl
 
 
-def test_v06_public_contract_exports():
-    assert memdsl.__version__ == "0.6.0"
+def test_v08_public_contract_exports():
+    assert memdsl.__version__ == "0.8.0"
     assert memdsl.EVIDENCE_PACK_SCHEMA == "memdsl.evidence_pack.v1"
     assert memdsl.Workspace is not None
     assert memdsl.Declaration is not None

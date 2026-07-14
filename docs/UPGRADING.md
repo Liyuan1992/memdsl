@@ -1,16 +1,20 @@
-# Upgrading from the memdsl 0.6 baseline
+# Upgrading to memdsl 0.8
 
-Published baseline: memdsl 0.6.0, 2026-07-14.
+Release target: memdsl 0.8.0, 2026-07-14. The previous published baseline is
+0.6.0; 0.7.0 was not separately published.
 
-The Phase 0-5 sections below also describe staged source-line behavior in this
-repository. They do not freeze the next release version or promise that every
-staged surface will ship unchanged; the release-candidate audit owns that
-decision.
+The v1 compatibility/authority surfaces, Catalog v1, Trace v1, indexed
+query/search trace, report diagnostics, workspace v2, exact `use`,
+`dialect_mapping`, `ViewContext`/`ResolvedView`, and explicit v2 read schemas
+are public 0.8 contracts. Real-workspace quarantine/strict rollout quality,
+dialect-candidate learning, and host-attested principal integration remain
+experimental and opt-in. `CompiledWorkspace`, compiler/cache/index layouts,
+contract strings, complexity constants, and synthetic timings remain internal.
 
 ## Python compatibility
 
 The core package and `memdsl` CLI continue to support Python 3.9+. The
-optional `mcp>=1.2` SDK requires Python 3.10+, so 0.6 marks the MCP
+optional `mcp>=1.2` SDK requires Python 3.10+, so 0.8 keeps the MCP
 dependency with `python_version >= "3.10"`.
 
 - On Python 3.9, install `memdsl` or `memdsl[dev]`; the deployment is
@@ -20,10 +24,32 @@ dependency with `python_version >= "3.10"`.
 - Do not interpret a Python 3.9 base-package installation as providing the MCP
   SDK/server runtime.
 
+## From 0.6 to 0.8
+
+Install `memdsl==0.8.0` only after reviewing the migration mode that applies to
+the workspace. Existing no-manifest and `memdsl.workspace.v1` workspaces do
+not require a `.mem` rewrite and keep legacy v1 read behavior. New clients
+should adopt bounded Catalog/Trace incrementally; Map v1 remains available for
+the entire 0.8 line and is not eligible for removal before 1.0.
+
+| Scenario | Upgrade and rollback contract |
+| --- | --- |
+| Stay on v1/no manifest | Keep existing Source; adopt Catalog/Trace without changing authority semantics |
+| Opt in workspace-v2 linking | Start with `linking.visibility=report`, repair exact-use and one-module-per-file diagnostics, then let the owner choose `strict` |
+| Opt in read enforcement | Start with or return to `enforcement.mode=report`; only explicit `quarantine|strict` selects v2 read envelopes |
+| Roll back a 0.8 feature | Change linking/enforcement back to `report`; do not delete Source, proposals, review stores, or append-only audit history |
+| Downgrade runtime to 0.6 | First remove v2-only fields or migrate to v1/no manifest and prove the workspace does not depend on strict linking/quarantine; pinning the wheel alone is unsafe because 0.6 correctly fails closed on workspace v2 |
+| Retry pagination after Source change | Discard the stale cursor and restart from the first page; never combine pages across Source/View revisions |
+
+The Phase 0A supersedes fix has no legacy opt-out: non-authoritative relations
+must not hide active memory or hard constraints. Experimental rollout labels
+also do not relax authorization-before-aggregation, hard-rule completeness,
+repair-lane availability, or non-authoritative-edge safety.
+
 ## From 0.5
 
-Pin `memdsl==0.6.0` and review these behavioral changes before enabling any
-write automation.
+Install `memdsl==0.8.0` and review both the 0.6 write-policy changes and the 0.8
+read-path changes before enabling any write automation or v2 enforcement.
 
 ### EvidencePack lifecycle authority
 
@@ -77,7 +103,7 @@ use an exact full id or unique bare reference.
 
 ### Compiled link diagnostics and report-only View
 
-The Phase 1 source line adds report-only compiler/link diagnostics without
+Version 0.8 adds report-only compiler/link diagnostics without
 changing default Map v1, EvidencePack v1, list, or compliance authority:
 
 - `supersedes`/`revision_of` cycles emit `revision_cycle` errors. Active cycle
@@ -96,12 +122,12 @@ changing default Map v1, EvidencePack v1, list, or compliance authority:
 
 These diagnostics can make an already structurally broken workspace fail
 `memdsl lint` where the old linter was silent. Fix the source relation or id;
-there is no `.mem` syntax migration. Phase 1 kept compiler/View classes
-internal; Phase 5 later promotes only the resolved read types documented below.
+there is no `.mem` syntax migration. Compiler implementation types remain
+internal; only the resolved read types documented below are public.
 
-### Bounded Catalog navigation (Phase 2 source line)
+### Bounded Catalog navigation (0.8)
 
-Phase 2 adds a new surface instead of changing Map v1:
+Version 0.8 adds a new surface instead of changing Map v1:
 
 - Python: `build_memory_catalog()` and `CATALOG_SCHEMA = "memdsl.catalog.v1"`;
 - CLI: `memdsl catalog PATH...`;
@@ -130,9 +156,9 @@ clients to start with Catalog; legacy clients may continue using Map. Catalog
 does not alter query or compliance: hard constraints are still evaluated by the
 complete authority path, independent of Catalog item/byte budgets.
 
-### Indexed query, vocabulary suggestions, and Trace (Phase 3 source line)
+### Indexed query, vocabulary suggestions, and Trace (0.8)
 
-Phase 3 changes candidate selection internally from a full scoring scan to a
+Version 0.8 changes candidate selection internally from a full scoring scan to a
 deterministic lexical inverted index. EvidencePack remains
 `memdsl.evidence_pack.v1`: existing layers, scores, tie-breaks, independent
 active/provisional result limits, filter-hidden diagnostics, global MUST rules,
@@ -159,10 +185,10 @@ filter, depth, provisional visibility, and schema; do not combine pages after
 `cursor_stale` or reuse a cursor with changed request identity. Trace is a BFS
 navigation projection over explicit relations, not proof. No `.mem`, manifest,
 or review-store migration is required. Map v1, query/list/explain/check v1,
-Catalog Phase 2 cursors/budgets, proposal/review/audit, and pending isolation
+Catalog cursors/budgets, proposal/review/audit, and pending isolation
 remain compatible.
 
-### Exact `use` visibility and Workspace Dialect (Phase 4 source line)
+### Exact `use` visibility and Workspace Dialect (0.8)
 
 No-manifest and `memdsl.workspace.v1` workspaces keep legacy global linking.
 The runtime does not infer strictness merely because a file contains `use`.
@@ -194,7 +220,7 @@ mode makes it an error and the file's uses do not grant strict imports. V1
 keeps the historical last-module-wins behavior.
 
 Strict mode removes unimported relation edges and subject/dialect routing
-effects. Declaration/family quarantine is a separate Phase 5 opt-in; strict
+effects. Declaration/family quarantine is a separate enforcement opt-in; strict
 linking alone does not enable it. Map/query/list/explain/check/compliance v1,
 Catalog/Trace schemas and budgets, and review/audit behavior are unchanged
 while enforcement remains `report`.
@@ -211,9 +237,9 @@ the existing proposal/review/approval path. Pending mappings remain invisible;
 approval only activates routing after the declaration is appended to Source
 with the correct module/use context and the workspace recompiles.
 
-### Opt-in quarantine enforcement and ResolvedView (Phase 5 source line)
+### Opt-in quarantine enforcement and ResolvedView (0.8 experimental rollout)
 
-Phase 5 is report-first and does not change existing workspaces. No manifest,
+Version 0.8 is report-first and does not change existing workspaces. No manifest,
 `memdsl.workspace.v1`, and workspace-v2 manifests with omitted or explicit
 `enforcement.mode=report` continue to use the legacy/v1 read contracts.
 
@@ -276,7 +302,7 @@ CLI exit behavior under explicit enforcement is intentional:
 - `catalog` returns 1 for cursor errors and 2 for invalid requests;
 - `check` remains 0/1/2 for ALLOW/BLOCK/NEEDS_REVIEW.
 
-Phase 5 read identity is host-attested. Only the in-process
+Version 0.8 read identity is host-attested. Only the in-process
 `MemdslMCPService` constructor can inject `principal`, `principal_trusted`, and
 `principal_roles`; MCP callers cannot self-report identity in tool arguments.
 An absent/untrusted principal never widens access. Filtering precedes counts,

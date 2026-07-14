@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+env:
+  MEMDSL_RELEASE_VERSION: "0.8.0"
+
 jobs:
   core:
     name: core / ${{ matrix.os }} / Python ${{ matrix.python-version }}
@@ -19,10 +22,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      - name: Install
-        run: python -m pip install -U pip build && python -m pip install -e ".[dev]"
-      - name: Compile
-        run: python -m compileall -q src tests
+      - name: Install core and release tooling
+        run: python -m pip install -U pip && python -m pip install -e ".[dev]"
+      - name: Verify version contract
+        run: python scripts/release_checks.py version --expected ${{ env.MEMDSL_RELEASE_VERSION }}
+      - name: Compile and Python 3.9 syntax gate
+        run: |
+          python -m compileall -q src tests scripts
+          python scripts/release_checks.py python39-ast
       - name: Verify MCP dependency marker
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.9'
         shell: python
@@ -43,36 +50,74 @@ jobs:
           assert not requirement.marker.evaluate(environment)
           environment["python_version"] = "3.10"
           assert requirement.marker.evaluate(environment)
-      - name: Test
+      - name: Full core tests
         run: python -m pytest -q
       - name: CLI smoke
         run: |
           memdsl --version
           memdsl lint examples/mira
+          memdsl catalog examples/alex --json
+          memdsl trace examples/alex decision:aurora.pricing_free_tier --depth 2 --json
           memdsl eval compliance examples/compliance --cases examples/compliance/cases.jsonl
-      - name: Build and inspect wheel
-        run: |
-          python -m build
-          python -m pip install --force-reinstall dist/*.whl
-          python -c "import memdsl; assert memdsl.__version__ == '0.6.0'; assert memdsl.EVIDENCE_PACK_SCHEMA == 'memdsl.evidence_pack.v1'; assert memdsl.POLICY_VERSION == 'memdsl.policy.v1'"
-          python -m twine check dist/*
 
   mcp:
-    name: mcp / ${{ matrix.os }} / Python 3.12
+    name: mcp / ${{ matrix.os }} / Python ${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.12"]
     runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install MCP extra
+        run: python -m pip install -U pip && python -m pip install -e ".[dev,mcp]"
+      - name: Full tests with real stdio enabled
+        run: python -m pytest -q
+      - name: Phase stdio, scope-denial, v1/v2, and quarantine gates
+        run: |
+          python -m pytest -q tests/test_phase_three_indexed_query_trace.py tests/test_phase_four_use_dialect.py tests/test_phase_five_quarantine_enforcement.py
+      - name: MCP inspect
+        run: python -m memdsl.mcp_server --inspect -w examples/alex
+
+  release-gates:
+    name: release gates / Python 3.12
+    needs: [core, mcp]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install MCP extra
+      - name: Install complete release environment
         run: python -m pip install -U pip && python -m pip install -e ".[dev,mcp]"
-      - name: Full tests
-        run: python -m pytest -q
-      - name: MCP smoke
-        run: memdsl-mcp --inspect -w examples/alex
+      - name: Version, compile, and full tests
+        run: |
+          python scripts/release_checks.py version --expected ${{ env.MEMDSL_RELEASE_VERSION }}
+          python scripts/release_checks.py python39-ast
+          python -m compileall -q src tests scripts
+          python -m pip check
+          git diff --check
+          python -m pytest -q
+      - name: Synthetic scale and security stop gates
+        run: |
+          python -m pytest -q tests/test_phase_minus_one_characterization.py tests/test_phase_two_catalog_budget.py tests/test_phase_three_indexed_query_trace.py tests/test_phase_four_use_dialect.py tests/test_phase_five_quarantine_enforcement.py
+      - name: Build, Twine, member listing, and privacy scan
+        run: |
+          python -m build
+          python -m twine check dist/*
+          python scripts/release_checks.py artifacts --dist dist --expected ${{ env.MEMDSL_RELEASE_VERSION }}
+      - name: Outside-repo fresh wheel and real MCP stdio smoke
+        run: |
+          python scripts/release_fresh_install.py --wheel dist/memdsl-${{ env.MEMDSL_RELEASE_VERSION }}-py3-none-any.whl --workspace examples/alex --expected ${{ env.MEMDSL_RELEASE_VERSION }}
+      - name: Upload verified release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: memdsl-${{ env.MEMDSL_RELEASE_VERSION }}
+          path: dist/*
+          if-no-files-found: error

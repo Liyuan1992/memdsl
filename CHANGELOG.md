@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.8.0 - 2026-07-14
+
+- Skipped an unpublished 0.7.0 and integrated the verified Phase -1 through
+  Phase 5 source line into one 0.8.0 release candidate. Phase 6 first-class
+  edges and Phase 7 cold-history/incremental compilation remain explicitly
+  deferred behind evidence gates.
+- Fixed the supersedes authority boundary so candidate, retracted, archived,
+  ambiguous, duplicate, dangling, or wrongly prefixed source relations cannot
+  hide active memory or remove an applicable hard constraint.
+- Added deterministic compiled identity, semantic, lexical, module, and graph
+  indexes while keeping `CompiledWorkspace`, cache formats, compiler contract
+  strings, complexity constants, and synthetic timings internal.
+- Added stable report-only compiler/link diagnostics for duplicate identity,
+  dangling/ambiguous/wrong-prefix targets, unknown relations, revision cycles,
+  supersede forks, exact-use visibility, multiple module statements, and
+  workspace-owned dialect mappings.
+- Added bounded Catalog v1 navigation with item/byte budgets, explicit
+  truncation, structured-or-text representation, and Source/View-bound opaque
+  cursors. Map v1 remains compatible throughout the 0.8 line and will not be
+  reconsidered for removal before 1.0.
+- Added deterministic indexed query candidate selection, additive search-trace
+  diagnostics and lexical retry suggestions, plus bounded incoming/outgoing
+  BFS Trace v1. Graph connectivity remains navigation over declared Source,
+  not proof.
+- Added `memdsl.workspace.v2`, exact module-or-symbol `use`, the generic
+  `dialect_mapping` capability, public `ViewContext`/`ResolvedView`, and
+  separate v2 query/list/explain/check/Catalog/Trace schemas.
+- Kept quarantine and strict rollout quality experimental and explicit opt-in.
+  Authorization-before-aggregation, hard-rule completeness, non-authoritative
+  edges having no authority, and repair-lane availability remain mandatory
+  safety invariants whenever enforcement is enabled.
+- Kept dialect candidate learning advisory and review-gated, and kept
+  host-attested principal integration an embedding-host contract rather than
+  an identity provider or complete multi-tenant authentication system.
+- Documented v1/v2 compatibility, report-first migration, feature rollback,
+  and the requirement to remove v2-only semantics before downgrading a
+  workspace to a 0.6 runtime.
+- Expanded CI to core Python 3.9-3.12 and MCP Python 3.10/3.12 representative
+  matrices, with explicit real-stdio, scope-denial, v1/v2, quarantine,
+  synthetic-scale, differential, and security stop gates.
+- Hardened tag publishing to install the MCP extra, run full tests and
+  compile/AST gates, inspect and privacy-scan wheel/sdist members, and perform
+  an outside-repository fresh-wheel CLI plus real MCP stdio smoke before upload.
+
 ## 0.6.0 - 2026-07-14
 
 - Kept the dependency-free core on Python 3.9+ while marking the optional
