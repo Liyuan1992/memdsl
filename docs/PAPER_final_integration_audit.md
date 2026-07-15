@@ -1,7 +1,7 @@
-# Phase 6 Mainline Local Release and Publication-Boundary Audit
+# memdsl 0.9.0 Software Release and Publication-Boundary Audit
 
-**Audit date:** 2026-07-15<br>
-**Release line:** local `0.9.0.dev0` candidate<br>
+**Audit date:** 2026-07-16<br>
+**Release line:** `0.9.0` software release; experimental Edge remains opt-in<br>
 **Paper/candidate baseline:** `4ee810833ef0cbd8562e72e3ad202a07c5ce77e8`<br>
 **Experimental Edge implementation:** `6bc3ffd986b1ffe29cefa928642fd0cf47e5c2c9`<br>
 **Human-review reconciliation:** `4ec9d43fda56a277609dd822c61acdb9a7265655`<br>
@@ -24,7 +24,7 @@ implementation target rather than a conforming paper-authority runtime.
 
 ## Frozen release matrix
 
-| Classification | Current local candidate |
+| Classification | Current release |
 | --- | --- |
 | Stable/public | Source authority; proposal/review/approval; append-only audit and pending isolation; public rebuildable `CompiledWorkspace` / `compile_workspace`; v1/v2 Catalog, Query, List, Explain, Check, Trace, Map compatibility, workspace schemas, and existing public API contracts |
 | Experimental | workspace v3; `features.explicit_edges="experimental-v1"`; `relation_edge` / `explicit_edge`; Edge events, evidence, lifecycle, list/explain/Trace, and dedicated CLI confirmation; all four built-in Edge descriptors |
@@ -61,7 +61,7 @@ understanding, comparative effectiveness, or mechanized security follows.
 | Compile | `compileall -q src tests scripts` passed |
 | Python compatibility | Python 3.9 AST gate passed for 22 source files |
 | Dependency integrity | `pip check`: no broken requirements |
-| Version contract | `0.9.0.dev0` across project, runtime, tests, and CI |
+| Version contract | `0.9.0` across project, runtime, tests, and CI |
 | Fixed build epoch | `SOURCE_DATE_EPOCH=1784077269` |
 | Exact-commit source bytes | Two new independent clean roots from the commit containing this receipt reported the same tracked-source digest; all 109 tracked files used canonical LF bytes |
 | Build backend | Hatchling `1.31.0` exactly pinned in build-system and release environment; both builds used `python -m build --no-isolation` after the toolchain gate |
@@ -90,8 +90,8 @@ result does not create a self-referential artifact hash.
 
 | Archive | Bytes | Members | SHA-256 |
 | --- | ---: | ---: | --- |
-| `memdsl-0.9.0.dev0-py3-none-any.whl` | 330,917 | 44 | `f7898683450cca77729c8726c0ee69358a7fabb795ce6d687e206dacd8041421` |
-| `memdsl-0.9.0.dev0.tar.gz` | 428,516 | 108 | `98aa22fd5d05b7054b5b92e38cc7c88177df60a9b7bb7707fec9b460de5fe977` |
+| `memdsl-0.9.0-py3-none-any.whl` | 330,980 | 44 | `a2c488b5e67c71b4d660a42ec64aa5d70fb27377c5bab3a43b0d0f7a19ec10ae` |
+| `memdsl-0.9.0.tar.gz` | 428,649 | 108 | `039d4736d2cd0d3670174d837eca0dd9fbaeb43fb7e06306f482705eb750c752` |
 
 Both archives must include the documentation index, practical design, explicit
 Edge design, release-scope freeze, SPEC, PUBLIC_API, UPGRADING, focused paper,
@@ -113,14 +113,19 @@ runtime path is included in this audit or the release artifacts.
 
 ## Decision
 
-- **GO:** the local `0.9.0.dev0` Phase 6 mainline release candidate passes the
+- **GO:** the `0.9.0` software release passes the
   frozen implementation, canonical LF exact-byte baselines, compatibility,
   paper-boundary, exact-commit reproducibility, archive, privacy, and
   fresh-install gates in this window.
-- **NO-GO:** push, tag, GitHub Release, PyPI, Zenodo, DOI, deployment, or public
-  paper submission in this window.
+- **GO after explicit user authorization:** fast-forward main, tag `v0.9.0`,
+  GitHub Release, and PyPI software publication may proceed only after the
+  final exact-commit verification in this receipt.
+- **NO-GO:** Zenodo, DOI, deployment, private-data activation, or public paper
+  submission in this software-release scope.
 - **NO-GO:** describing experimental Edges as stable, automatic, or proof that
   private-memory extraction is solved.
 - **NO-GO:** describing memdsl as implementing the paper authority runtime.
 
-No remote publication or deployment action occurred during this audit.
+Remote software state is external evidence and must be verified after push;
+this source receipt does not claim that a remote action succeeded merely
+because it was authorized.

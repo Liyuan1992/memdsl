@@ -1,7 +1,7 @@
 # memdsl Public Python API
 
-Release baseline: stable 0.8 contracts plus the unreleased `0.9.0.dev0`
-experimental Edge extension, 2026-07-15.
+Release baseline: memdsl `0.9.0`, carrying stable 0.8 contracts plus the
+experimental Edge extension, 2026-07-16.
 
 Stable 0.8 contracts include Source authority and review-gated writes,
 `CompiledWorkspace` / `compile_workspace`, the v1 compatibility/authority
@@ -18,7 +18,7 @@ normative. `CompiledWorkspace` is a public rebuildable handle, but cache/index
 layout details, compiler contract strings, complexity constants, and synthetic
 timing are not public API or performance SLAs.
 
-The `0.9.0.dev0` workspace-v3 explicit Edge surface is experimental. Automatic
+The `0.9.0` workspace-v3 explicit Edge surface is experimental. Automatic
 dialect learning, automatic Edge candidate generation, inferred authoritative
 edges, stable Edge promotion, and Phase 7 cold-history/incremental compilation
 are planned rather than shipped. Host extraction, sanitization, private schema,

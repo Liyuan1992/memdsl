@@ -1,7 +1,7 @@
 # Phase 6 Release Scope and Evidence Freeze
 
-Status: local `0.9.0.dev0` release candidate; no remote release action is
-implied or authorized.
+Status: memdsl `0.9.0` software release scope. Tag `v0.9.0` anchors the package
+version without promoting the opt-in Edge surface beyond experimental.
 
 This record freezes the product boundary after the focused paper integration,
 the experimental explicit-Edge implementation, and the anonymous human-review
@@ -111,10 +111,12 @@ the final commit before the receipt can authorize another independent review.
 
 ## Release boundary
 
-The local candidate may be accepted only if the full synthetic CLI/MCP,
+The release may be accepted only if the full synthetic CLI/MCP,
 scoped-denial, gated-write, build, artifact-membership, privacy, reproducible
 build, and outside-repository fresh-wheel gates pass. Host-specific sanitizer
 or extraction activation remains excluded from that decision.
 
-Push, tag, GitHub Release, Zenodo, DOI, PyPI, deployment, and publication remain
-separate, explicitly authorized actions.
+The `v0.9.0` software release may publish the verified package without changing
+the classifications above. Paper submission, Zenodo, DOI, host deployment,
+private-data activation, and any authority-semantic expansion remain separate,
+explicitly authorized actions.

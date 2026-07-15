@@ -1,4 +1,4 @@
-"""Experimental next-minor metadata and inherited release-gate assertions."""
+"""0.9.0 release metadata and inherited release-gate assertions."""
 
 from pathlib import Path
 import importlib.util
@@ -8,7 +8,7 @@ import memdsl
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "0.9.0.dev0"
+EXPECTED_VERSION = "0.9.0"
 EXPECTED_HATCHLING = "1.31.0"
 
 
@@ -18,7 +18,7 @@ def test_release_version_is_consistent_across_runtime_and_project_metadata() -> 
     assert match is not None
     assert match.group(1) == EXPECTED_VERSION
     assert memdsl.__version__ == EXPECTED_VERSION
-    assert f"## {EXPECTED_VERSION} - 2026-07-15" in (
+    assert f"## {EXPECTED_VERSION} - 2026-07-16" in (
         ROOT / "CHANGELOG.md"
     ).read_text(encoding="utf-8")
 
@@ -39,7 +39,7 @@ def test_ci_covers_core_mcp_security_and_artifact_release_gates() -> None:
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
         encoding="utf-8"
     )
-    assert 'MEMDSL_RELEASE_VERSION: "0.9.0.dev0"' in workflow
+    assert 'MEMDSL_RELEASE_VERSION: "0.9.0"' in workflow
     assert 'SOURCE_DATE_EPOCH: "1784077269"' in workflow
     for version in ("3.9", "3.10", "3.11", "3.12"):
         assert f'"{version}"' in workflow

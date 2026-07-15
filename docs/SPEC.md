@@ -1,12 +1,12 @@
 # Memory DSL Specification
 
-Version: stable 0.8 base with `0.9.0.dev0` experimental extension
-Status: reference specification for the local memdsl release candidate
-Release date: unreleased; evidence freeze 2026-07-15
+Version: stable 0.8 base with `0.9.0` experimental extension
+Status: reference specification for memdsl 0.9.0
+Release date: 2026-07-16
 License: [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
 
 The frozen 0.8 contract below remains normative for v1/v2 workspaces.
-`0.9.0.dev0` adds the explicitly opt-in experimental contract in
+`0.9.0` adds the explicitly opt-in experimental contract in
 [Section 14](#14-experimental-phase-6-first-class-explicit-edges).
 
 ## 1. Core thesis
@@ -965,7 +965,7 @@ constraint recall, citation accuracy, and per-case results. The v0.4
 
 ## 14. Experimental Phase 6 first-class explicit Edges
 
-Phase 6 is available only in `0.9.0.dev0` with
+Phase 6 is available only in `0.9.0` with
 `memdsl.workspace.v3` and
 `features.explicit_edges="experimental-v1"`. An old 0.8 runtime rejects the
 unknown manifest version before loading Edge syntax; the 0.9 runtime rejects

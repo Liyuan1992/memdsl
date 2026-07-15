@@ -1,7 +1,7 @@
 # Phase 6 Experimental Explicit Edge Contract
 
-Status: experimental contract for `0.9.0.dev0`; not part of the frozen 0.8
-candidate semantics.
+Status: experimental contract shipped in `0.9.0`; not part of the frozen 0.8
+stable semantics.
 
 The stable/public, experimental, planned, and host-excluded release matrix is
 frozen in [RELEASE_SCOPE_PHASE6.md](RELEASE_SCOPE_PHASE6.md). This document is

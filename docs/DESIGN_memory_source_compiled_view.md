@@ -1,8 +1,8 @@
 # 设计与演进合同：无界 Memory Source、CompiledWorkspace 与有界 Agent View
 
-- 状态：Phase -1 至 Phase 5 冻结为 stable/public 0.8 合同；Phase 6 已作为 `0.9.0.dev0` 显式 opt-in 实验实现并完成人工复核对齐；Phase 7 继续延期
+- 状态：Phase -1 至 Phase 5 冻结为 stable/public 0.8 合同；Phase 6 已由 `0.9.0` 以显式 opt-in experimental 形式发布并完成人工复核对齐；Phase 7 继续延期
 - 发布整合链：论文/候选基线 `4ee810833ef0cbd8562e72e3ad202a07c5ce77e8` -> Edge 实现 `6bc3ffd986b1ffe29cefa928642fd0cf47e5c2c9` -> 人工复核对齐 `4ec9d43fda56a277609dd822c61acdb9a7265655`
-- 目标版本：本地 `0.9.0.dev0` release candidate；stable/public、experimental、planned、host-excluded 边界见 [RELEASE_SCOPE_PHASE6.md](RELEASE_SCOPE_PHASE6.md)；默认停止在本地 clean commit 与 release evidence
+- 软件版本：`0.9.0`；stable/public、experimental、planned、host-excluded 边界见 [RELEASE_SCOPE_PHASE6.md](RELEASE_SCOPE_PHASE6.md)；软件发布不改变论文、宿主激活或私人数据的独立授权门
 - 配套论文：聚焦立场论文 [Review-Gated Authority for Persistent Agent Memory](PAPER_review_gated_authority_source_compiled_contract.md) 与本文并列保存；论文 v0.6 的 authority ledger、digest-bound grants、proof objects、live reduction closure 和 `Verify` sinks 仍是未实现研究合同
 - 文档入口：[DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) 统一列出实践规范、论文、claim ledger、复现记录、就绪审计、引用和许可边界
 - 读者：memdsl 维护者、宿主集成者、MCP 客户端作者、领域 schema 作者
@@ -11,7 +11,7 @@
 本文档记录 memdsl 从“全量 Memory Map”演进到“Memory Source Code + 编译视图 + 有界任务投影”的完整原因、设计、实施顺序、兼容方案、风险、验证标准和决策记录。
 
 本文不是对现有能力的宣传材料。第 3 节等明确标为 0.6.0 baseline 的内容保留历史
-characterization；各阶段“实际完成结果”和第 24 节以当前 `0.9.0.dev0` 候选源码与本地证据
+characterization；各阶段“实际完成结果”和第 24 节以当前 `0.9.0` 源码与发布证据
 为准。凡尚未实现而标为 MUST/SHOULD/MAY 的内容仍是拟议合同，只有在对应阶段实现、
 测试、文档和发布门全部完成后，才能成为公开承诺。
 
@@ -1942,12 +1942,12 @@ memdsl.mcp.compile_status.v1
 | 0.6.x | 已发布基线；保留 v1 authority/compatibility promise，并吸收 Phase 0A 所定义的 correctness/security 边界 |
 | 0.7.0 | 不单独发布；原计划的 CompiledWorkspace/Catalog/Trace/Suggest/report diagnostics 已被 0.8.0 候选包含 |
 | 0.8.0 | Phase -1、0A、0B、1、2、3、4、5 的精确线性阶段链；包含全部 v1 兼容面、新 Catalog/Trace、workspace v2、ResolvedView 和显式 opt-in v2 enforcement |
-| 0.9.0.dev0 | stable/public 0.8 合同保持不变；新增 workspace-v3、一等 explicit Edge、evidence/lifecycle/review hard floor，全部保持 experimental |
-| 0.9+/条件 | 自动方言学习、自动 Edge 候选、stable Edge promotion、cold history/incremental compiler；均未发布 |
+| 0.9.0 | stable/public 0.8 合同保持不变；新增 workspace-v3、一等 explicit Edge、evidence/lifecycle/review hard floor，全部保持 experimental |
+| 后续/条件 | 自动方言学习、自动 Edge 候选、stable Edge promotion、cold history/incremental compiler；均未发布 |
 
 0.8.0 不删除 Map v1，不把任何 workspace 自动升级为 v2，也不把 quarantine/strict
 设为默认。Map v1 至少保留整个 0.8 release line，并且不早于 1.0 再评估删除。
-跳过未发布的 0.7.0 不缩短兼容窗口。后续 `0.9.0.dev0` 只以显式 feature gate
+跳过未发布的 0.7.0 与 0.8.0 不缩短兼容窗口。`0.9.0` 只以显式 feature gate
 增加实验 Edge，不改变 v1/v2 兼容窗口；Phase 7 仍不构成路线图承诺。
 
 ### Phase -1：冻结语义与基准
@@ -3326,7 +3326,7 @@ clean tag build、远端 CI 和 fresh PyPI install。本节不把尚未发生的
 ### 24.4 Phase 6 主线本地候选发布边界（2026-07-15）
 
 24.2/24.3 是 0.8 论文整合时点的历史收据；它们没有被改写成“当时已经实现
-Phase 6”。当前 `0.9.0.dev0` 候选在后续线性提交上增加实验 Edge，并冻结如下：
+Phase 6”。2026-07-15 的 `0.9.0.dev0` 候选在后续线性提交上增加实验 Edge，并冻结如下：
 
 | 分类 | 当前候选合同 |
 | --- | --- |
@@ -3336,7 +3336,9 @@ Phase 6”。当前 `0.9.0.dev0` 候选在后续线性提交上增加实验 Edge
 | planned/not shipped | 自动方言学习、自动 Edge 候选、inferred authoritative edges、stable Edge promotion、Phase 7 cold history/incremental compiler、论文 authority runtime |
 | host-specific/excluded | 私人 schema、extractor、sanitizer、样本、workbook、路径/ID 映射、policy、UI 与 runtime adapters；宿主 Shadow 是否激活不属于 memdsl release gate |
 
-当前版本保持 `0.9.0.dev0`，不将实验 Edge 伪装成 0.9 stable release。发布门除继承
+在 2026-07-15 本地冻结时版本保持 `0.9.0.dev0`，用来强调实验 Edge 不得被伪装
+成 stable 功能。正式 `0.9.0` 软件版本同样保留该 feature-level experimental
+分类。发布门除继承
 0.8 全套验证外，还必须包含 focused Phase 6、workspace-v3 CLI/MCP/stdio、reserved
 capability queue、gated Edge confirm、artifact privacy、固定 `SOURCE_DATE_EPOCH` 下的
 可重复构建，以及仓库外 wheel 从 `site-packages` 导入的证明。
@@ -3430,7 +3432,7 @@ Zenodo、DOI、deploy 和论文发表仍为 NO-GO，等待单独授权。
 | D-050 | Phase 6 一等 Edge 延期；四项 Entry-Gate 必须在已发布 Trace 的真实使用中同时满足 | 当前只有实现/文档/合成测试，没有外部 Trace consumer、独立 edge 审核案例、provenance 失败或 edge queue economics | 以知识图谱愿景、设计风险或 synthetic fixture 直接开启 parser/review 改造 | 延期；不得在 0.8.0 实现 |
 | D-051 | Phase 7 cold history/incremental compiler 延期；重复 synthetic 线性成本不是充分触发证据 | 10k 冷 parse/index 成本可重复，但没有真实 Source/history 规模、SLO、生产瓶颈或存储事件；热缓存路径与输出问题必须分开 | 因一次 timing、Map v1 大 payload 或主观增长担忧立即引入 object store/database | 延期；不得在 0.8.0 实现 |
 | D-052 | Phase -1 至 Phase 5 统一形成 0.8.0 候选，0.7.0 不单独发布；v2 协议公开但 enforcement rollout 保持 explicit opt-in experimental | 线性阶段链已同时包含原 0.7/0.8 规划，拆分会重复整合/验证；v2 安全合同已冻结但缺真实 rollout 数据 | 发布 0.7 后立即再发 0.8，或把 quarantine/strict 设为默认稳定行为 | 接受；Release Scope 冻结 |
-| D-053 | 后续经单独授权进入 Phase 6，但只发布 `0.9.0.dev0` feature-gated experimental Edge，不改写 stable 0.8 语义 | 匿名探索与首批人工复核显示 Edge 有独立审核价值，同时自动覆盖/evidence 稳定性不足 | 把 Edge 宣称 stable、自动生成/批准、或让显式 supersedes 改变 node authority | 接受并已实现；ADJUST |
+| D-053 | 后续经单独授权进入 Phase 6，并由 `0.9.0` 发布 feature-gated experimental Edge，不改写 stable 0.8 语义 | 匿名探索与首批人工复核显示 Edge 有独立审核价值，同时自动覆盖/evidence 稳定性不足 | 把 Edge 宣称 stable、自动生成/批准、或让显式 supersedes 改变 node authority | 接受并已实现；ADJUST |
 | D-054 | 五个 reserved Edge capabilities 永久人工审核，`related` discovery-only，`supersedes` 保持 experimental 且 graph-only | AI/宿主建议不能取得 durable authority；该批次未直接验证 supersedes | schema/policy `auto_approvable`、AI 自动 authority、related 进入 authoritative registry | 接受并已实现 |
 | D-055 | 宿主 extraction/sanitization/Shadow activation 与 memdsl core release gate 分离 | 宿主层污染和激活结论只能约束宿主 adapter，不能推翻通用 Source/review/Edge 合同 | 用私人 pipeline 的 NO-GO 无限阻塞 memdsl，或把修复逻辑并入 core | 接受；host-specific/excluded |
 | D-056 | Phase 7 与自动方言学习/自动 Edge 候选继续 planned/not shipped | 当前证据只支持人工审核的显式 Edge，不支持自动化或真实冷历史瓶颈 | 从 Phase 6 样本外推到自动生成、完全准确理解或 incremental compiler | 延期 |
@@ -3499,6 +3501,7 @@ module report/strict 行为已由 D-037 至 D-040 关闭：
 | 2026-07-15 | Phase 6 Edge 实现 / 起点 `4ee8108` | 新增 workspace-v3、显式 Edge record/event、relation registry、compiled graph、CLI/MCP 复用、target-context confirm 与永久人工审核 hard floor | 单独授权的匿名探索显示边具有独立审核价值，但不足以支持自动生成或 stable promotion | 0.8 v1/v2 保持；显式 supersedes graph-only；11 MCP tools/scopes 不变；Source 仍为 authority | `403 passed`、focused `47 passed`、CLI/MCP/stdio/gated write/build/privacy/fresh wheel 通过 | `6bc3ffd`；experimental |
 | 2026-07-15 | 人工复核对齐 / 起点 `6bc3ffd` | 将首批匿名人工结论、related discovery-only、supersedes 未验证和 CI 版本 gate 对齐 | `accept=7`、`uncertain=3`、`reject=0`；uncertain 为污染/不可审核，不是 Edge negative | 不提升任何 relation 稳定性，不新增自动 authority | full/focused/release/fresh-wheel gates 通过 | `4ec9d43`；ADJUST |
 | 2026-07-15 | Phase 6 发布范围冻结 | 公开 `CompiledWorkspace` 窄合同，建立 stable/experimental/planned/excluded 矩阵，并把 host sanitizer gate 与 memdsl release 分离 | 当前代码、论文/实践文档与 publish workflow 对 Phase 6 状态存在真实漂移 | 仅做通用 API/文档/release gate 对齐；不引入任何宿主语义或远程发布动作 | 以本窗口最终 local release evidence 为准 | 本地候选；等待独立验收 |
+| 2026-07-16 | 0.9.0 软件发布冻结 | 将包版本、CI、CFF、当前文档与 exact-commit 制品统一为 0.9.0，并在独立验收后执行软件发布 | `dev0` 与“未发布”状态已不再准确，但 Edge 证据仍只支持 experimental/ADJUST | 不改变 Source/review authority，不提升 Edge stability，不发表论文，不激活宿主私人管线 | full verify、双 clean-root、Twine、privacy、fresh-wheel、远端 CI/tag/PyPI/Release 核验 | 软件发布；论文与后续语义扩张仍需独立授权 |
 
 建议每条记录额外回答：
 
@@ -3546,8 +3549,9 @@ module report/strict 行为已由 D-037 至 D-040 关闭：
 - [x] README/SPEC/PUBLIC_API/UPGRADING 同步。
 - [x] 变更记录、迁移、回滚完成。
 
-以上只表示本地 release candidate gate 完成；远端 CI、tag、GitHub release 与 PyPI
-仍受本窗口强制停止语义约束，不能因本清单打勾而视为已经发布。
+以上清单记录 2026-07-15 的本地 release-candidate gate；其远端停止语义只描述
+当时的执行窗口。2026-07-16 经用户单独授权的软件发布不改变任何 authority、Edge
+stability、论文或宿主激活边界。
 
 ---
 

@@ -104,7 +104,7 @@ from memdsl.view import (
     resolve_view,
 )
 
-__version__ = "0.9.0.dev0"
+__version__ = "0.9.0"
 
 __all__ = [
     "parse_file",

@@ -6,9 +6,8 @@ type: software
 title: memdsl
 authors:
   - family-names: liyuan
-version: "0.6.0"
-date-released: 2026-07-14
-commit: 72274d9d4f065b76bceaf30f529dcbd47b3f3e18
+version: "0.9.0"
+date-released: 2026-07-16
 repository-code: https://github.com/Liyuan1992/memdsl
 url: https://github.com/Liyuan1992/memdsl
 license: MIT

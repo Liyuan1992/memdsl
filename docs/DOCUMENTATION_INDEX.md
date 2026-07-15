@@ -7,15 +7,15 @@ paper adjacent without treating either as a substitute for the other.
 
 | Item | Status | Authority |
 | --- | --- | --- |
-| memdsl `0.6.0` | Shipped software | tag `v0.6.0`, commit `72274d9d4f065b76bceaf30f529dcbd47b3f3e18` |
-| memdsl `0.8.0` | Frozen stable/public contract line inside the local candidate | v1/v2 Source, review, compiled-view, navigation, query, and enforcement contracts |
-| memdsl `0.9.0.dev0` | Unreleased local release candidate | stable 0.8 contracts plus the opt-in workspace-v3 explicit Edge experiment ending at `4ec9d43fda56a277609dd822c61acdb9a7265655` before this scope freeze |
+| memdsl `0.6.0` | Historical shipped baseline | tag `v0.6.0`, commit `72274d9d4f065b76bceaf30f529dcbd47b3f3e18` |
+| memdsl `0.8.0` | Frozen stable/public compatibility contract; not separately released | v1/v2 Source, review, compiled-view, navigation, query, and enforcement contracts |
+| memdsl `0.9.0` | Shipped software release | stable 0.8 contracts plus the opt-in workspace-v3 explicit Edge experiment; tag `v0.9.0` |
 | paper `v0.6` | Unpublished focused position-paper draft | P5 paper commit `5c55948b13029d82974cc12ee3249099b0444f75` |
 | paper authority runtime | Planned and unimplemented | the paper contract, not current memdsl behavior |
 
-`CITATION.cff` preserves the same split: its top-level record cites the shipped
-software `0.6.0`, while `preferred-citation` cites the unpublished paper
-version `0.6`. The local `0.8.0` candidate is not presented as a release.
+`CITATION.cff` preserves the same split: its top-level record cites shipped
+software `0.9.0`, while `preferred-citation` cites the unpublished paper
+version `0.6`. The stable 0.8 compatibility line was not separately released.
 
 ## Practical software contract
 

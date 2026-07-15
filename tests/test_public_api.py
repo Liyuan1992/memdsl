@@ -2,7 +2,7 @@ import memdsl
 
 
 def test_v09_experimental_public_contract_preserves_v08_exports():
-    assert memdsl.__version__ == "0.9.0.dev0"
+    assert memdsl.__version__ == "0.9.0"
     assert memdsl.EVIDENCE_PACK_SCHEMA == "memdsl.evidence_pack.v1"
     assert memdsl.Workspace is not None
     assert memdsl.Declaration is not None

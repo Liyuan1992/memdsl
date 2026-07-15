@@ -1,6 +1,6 @@
-# Upgrading to memdsl 0.8
+# Upgrading to memdsl 0.9.0
 
-## 0.8 candidate to 0.9.0.dev0 experimental Edge line
+## Stable 0.8 contracts to the 0.9.0 experimental Edge line
 
 No automatic migration is performed. Existing v1/v2 workspaces retain exact
 0.8 semantics. To experiment with first-class Edges, create a branch, change
@@ -33,9 +33,9 @@ Host-specific extraction/sanitization, private schemas/policies/samples, and
 runtime adapters are excluded rather than migration targets. See
 [the Phase 6 release matrix](RELEASE_SCOPE_PHASE6.md).
 
-Local release target: memdsl `0.9.0.dev0`, 2026-07-15. The previous published
-baseline is 0.6.0; 0.7.0 was not separately published, and 0.8 remains the
-stable/public compatibility contract carried by this dev candidate.
+Release: memdsl `0.9.0`, 2026-07-16. The previous published baseline was
+0.6.0; 0.7.0 and 0.8.0 were not separately published, and the 0.8 contract is
+the stable/public compatibility surface carried by 0.9.0.
 
 The v1 compatibility/authority surfaces, Catalog v1, Trace v1, indexed
 query/search trace, report diagnostics, workspace v2, exact `use`,
@@ -59,9 +59,9 @@ dependency with `python_version >= "3.10"`.
 - Do not interpret a Python 3.9 base-package installation as providing the MCP
   SDK/server runtime.
 
-## From 0.6 to 0.8
+## From 0.6 to the 0.8-compatible surface in 0.9.0
 
-Install `memdsl==0.8.0` only after reviewing the migration mode that applies to
+Install `memdsl==0.9.0` only after reviewing the migration mode that applies to
 the workspace. Existing no-manifest and `memdsl.workspace.v1` workspaces do
 not require a `.mem` rewrite and keep legacy v1 read behavior. New clients
 should adopt bounded Catalog/Trace incrementally; Map v1 remains available for
@@ -83,7 +83,7 @@ repair-lane availability, or non-authoritative-edge safety.
 
 ## From 0.5
 
-Install `memdsl==0.8.0` and review both the 0.6 write-policy changes and the 0.8
+Install `memdsl==0.9.0` and review both the 0.6 write-policy changes and the 0.8
 read-path changes before enabling any write automation or v2 enforcement.
 
 ### EvidencePack lifecycle authority
@@ -299,7 +299,7 @@ The public Python additions are `ViewContext`, `ResolvedView`,
 `resolve_view()`, `RESOLVED_VIEW_SCHEMA`, `ENFORCEMENT_TABLE`,
 `build_resolved_evidence_pack()` with `RESOLVED_EVIDENCE_PACK_SCHEMA`,
 `build_resolved_query/list/explain/check()`, `ResolvedCursorError`, and the
-v2 Catalog/Trace schema constants. The current candidate additionally exports
+v2 Catalog/Trace schema constants. Version 0.9.0 additionally exports
 the rebuildable `CompiledWorkspace` handle and `compile_workspace()` without
 changing these v2 serialized contracts.
 

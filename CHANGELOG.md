@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.0.dev0 - 2026-07-15
+## 0.9.0 - 2026-07-16
 
 - Experimental Phase 6 first-class explicit Edge source/model contract with
   stable identities, evidence, lifecycle events, extensible relation registry,
@@ -22,7 +22,7 @@
   membership drift, and required a fixed `SOURCE_DATE_EPOCH` plus outside-repo
   wheel imports from `site-packages` for local release evidence.
 
-## 0.8.0 - 2026-07-14
+## 0.8.0 - 2026-07-14 (unreleased compatibility candidate)
 
 - Skipped an unpublished 0.7.0 and integrated the verified Phase -1 through
   Phase 5 source line into one 0.8.0 release candidate. Phase 6 first-class

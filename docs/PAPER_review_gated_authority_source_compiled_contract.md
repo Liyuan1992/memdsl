@@ -371,10 +371,10 @@ The implementation status is deliberately split by immutable tag or commit:
 
 | status | exact evidence | scope |
 | --- | --- | --- |
-| shipped software | tag `v0.6.0`, commit `72274d9d4f065b76bceaf30f529dcbd47b3f3e18` | public 0.6.0 baseline |
+| historical shipped baseline | tag `v0.6.0`, commit `72274d9d4f065b76bceaf30f529dcbd47b3f3e18` | public 0.6.0 baseline |
 | stable/public implementation line | Phase -1 through Phase 5, integrated by `4ee810833ef0cbd8562e72e3ad202a07c5ce77e8` | Source/review authority boundary, public `CompiledWorkspace`, Catalog, Query, Trace, exact `use`, Dialect, and opt-in quarantine/`ResolvedView` |
 | experimental Phase 6 | `6bc3ffd986b1ffe29cefa928642fd0cf47e5c2c9`, reconciled by `4ec9d43fda56a277609dd822c61acdb9a7265655` | opt-in workspace-v3 explicit Edge records/events/evidence/lifecycle and permanent human-review floor; not stable and not paper-authority conformance |
-| unreleased local candidate | `0.9.0.dev0` release-scope freeze after `4ec9d43fda56a277609dd822c61acdb9a7265655` | local implementation and release evidence only; no remote release or deployment claim |
+| software release | `0.9.0`, anchored by tag `v0.9.0` after the release-scope freeze | stable 0.8 contracts plus feature-gated experimental Phase 6; no paper-authority conformance or deployment claim |
 | deferred implementation | current release-scope freeze | Phase 7 cold-history/incremental compilation, automatic dialect learning, automatic Edge candidates, and the paper authority runtime |
 | planned paper contract | manuscript source `3535bfb9661724818011f4bf2823ed09e895069a` plus this metadata revision | `L_auth`, digest-bound grants, proofs, live reduction closure, and checked sinks |
 

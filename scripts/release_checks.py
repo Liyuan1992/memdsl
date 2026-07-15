@@ -68,7 +68,7 @@ FORBIDDEN_SUFFIXES = {
 
 RELEASE_SOURCE_DATE_EPOCH = 1784077269
 RELEASE_HATCHLING_VERSION = "1.31.0"
-EXPECTED_PAPER_WORDS = 5250
+EXPECTED_PAPER_WORDS = 5256
 
 REQUIRED_PAPER_MEMBER_SUFFIXES = {
     "CITATION.cff",
@@ -91,11 +91,11 @@ REQUIRED_PAPER_MEMBER_SUFFIXES = {
 }
 
 PAPER_FROZEN_BLOB_HASHES = {
-    "CITATION.cff": "10d97f3146253555f06b52edc85dcf45053f39c55a3530ac55e060eca7a97499",
-    "docs/PAPER_publication_readiness_audit.md": "c4a2cfad7e6462abeffb0b38615cc2511cf5a7a5e8910c51599908737af6e837",
+    "CITATION.cff": "a6b101b322f7bc378d70bc4c55d56a6db98186298d5890b6c306e4226a53d182",
+    "docs/PAPER_publication_readiness_audit.md": "592b58f05d8c69c4ec5356b47a36b4eaa0a3838185319f04cea592af3b104a55",
     "docs/PAPER_related_work_claim_ledger.md": "0704562e6a7631e78ec369970e65f591563c42289b8746eb96c9dd1ee134190c",
-    "docs/PAPER_reproducibility_and_release_metadata.md": "083ef73a0d99d5dec8ca0969bc1753faea2f5a7de4951009901be1c5f7a90c30",
-    "docs/PAPER_review_gated_authority_source_compiled_contract.md": "133d489ed6d8bc016de246cbf87f33dc083d09d7b9092a11456ae3c736317a45",
+    "docs/PAPER_reproducibility_and_release_metadata.md": "3659450dff2671251cdc4a66416903625d661762f659f11b4cf5a8e0fdc2de31",
+    "docs/PAPER_review_gated_authority_source_compiled_contract.md": "63cf881b1a13f58e5f7d81cd40a062b99e11fa78c79dc732a5448480fabb5d7f",
 }
 
 FROZEN_BASELINE_HASHES = {
@@ -409,14 +409,18 @@ def check_paper(repo_root: Path) -> None:
     citation = (repo_root / "CITATION.cff").read_text(encoding="utf-8")
     for required in (
         "cff-version: 1.2.0",
-        'version: "0.6.0"',
-        "commit: 72274d9d4f065b76bceaf30f529dcbd47b3f3e18",
+        'version: "0.9.0"',
+        "date-released: 2026-07-16",
         "preferred-citation:",
         '  version: "0.6"',
         "  license: CC-BY-4.0",
     ):
         if required not in citation:
             failures.append(f"CITATION.cff missing contract text: {required}")
+    if "\ncommit:" in citation:
+        failures.append(
+            "CITATION.cff must use the release version/tag rather than a self-referential commit"
+        )
 
     paper_license = (repo_root / "docs/PAPER_LICENSE.md").read_text(encoding="utf-8")
     for name in (
