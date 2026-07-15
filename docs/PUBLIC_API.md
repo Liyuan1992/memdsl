@@ -632,6 +632,12 @@ from memdsl import (
 `relation_edge` and `explicit_edge` source spellings. Compiled Edge objects
 separate `record_id`, `declared_by_id`, `source_id`, and `target_id`.
 
+All built-in relation descriptors remain `experimental`. The anonymous first
+human follow-up batch supplied sample support for `supports`, `depends_on`, and
+`contradicts`, but did not validate `supersedes`; AI recommendation alone does
+not promote it to stable. `related` is discovery-only and is not an
+authoritative built-in relation.
+
 `build_explicit_edge_catalog()` and `explain_explicit_edge()` accept a
 workspace/compiled workspace or a `ResolvedView`. They apply record + source +
 target readability before returning ids, counts, evidence, lifecycle events,

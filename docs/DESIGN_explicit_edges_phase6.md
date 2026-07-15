@@ -6,17 +6,30 @@ candidate semantics.
 ## Pilot basis
 
 The evidence basis is an anonymous, single-principal exploratory pilot, not a
-formal empirical conclusion. The primary 40-item review produced 5 suggested
-accepts, 16 suggested rejects, and 19 items still requiring a person. Across
-all 100 items the counts were 15, 40, and 45. The user manually accepted four
-`supports` edges and kept one excerpt affected by command contamination under
-human review. The decision is **ADJUST**: explicit Edges are useful, while
-automatic candidate type/evidence stability must be narrower.
+formal empirical conclusion. The primary 40-item AI pre-review produced 5
+suggested accepts, 16 suggested rejects, and 19 items still requiring a
+person. Across all 100 items the counts were 15, 40, and 45.
 
-The high-evidence built-in relation set is `supports`, `depends_on`,
-`supersedes`, and `contradicts`. `refines` is not a built-in. A workspace may
-register a namespaced relation such as `research.refines` with
-`stability: experimental`.
+The first completed human follow-up batch contained 10 items. Seven were
+reviewable and accepted: four `supports`, one `depends_on`, one `contradicts`,
+and one discovery-only `related` comparison. The other three were invalid or
+unreviewable source contamination (one evidence-summary mismatch and two
+runtime/command/attachment metadata captures), not Edge negatives; they are
+excluded from the Edge precision denominator and belong in the host extraction
+repair queue. All seven accepted comparisons had sufficient evidence. The
+three typed built-in relations accounted for six authoritative Edge candidates
+with independent lifecycle and standalone-management value. The `related`
+comparison had neither and remains discovery-only. The decision is **ADJUST**:
+explicit Edges are useful, while automatic candidate type/evidence stability
+must be narrower.
+
+The built-in relation set remains `supports`, `depends_on`, `supersedes`, and
+`contradicts`. The human follow-up sample supports first-class value for
+`supports`, `depends_on`, and `contradicts`; it did not validate `supersedes`,
+which therefore cannot be promoted to stable from AI recommendation alone.
+`related` is not a built-in authoritative relation. `refines` is not a
+built-in either. A workspace may register a namespaced relation such as
+`research.refines` with `stability: experimental`.
 The four built-ins themselves also report `stability: experimental` in this
 Phase 6 line. Built-in availability does not turn the exploratory Pilot into a
 formal empirical validation claim.

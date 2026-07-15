@@ -978,6 +978,11 @@ extension relations with explicit stability. `refines` is not a validated
 built-in and MUST remain an experimental extension when used.
 All four built-in descriptors remain `stability: experimental` during Phase 6;
 "built-in" means a public default vocabulary, not empirically validated truth.
+The anonymous first human follow-up batch supplied sample support for
+`supports`, `depends_on`, and `contradicts`. It did not validate `supersedes`,
+so AI recommendation alone MUST NOT promote that descriptor to stable.
+`related` remains discovery-only and MUST NOT enter the authoritative built-in
+Edge registry.
 
 Only active, resolved Edge records with active endpoints enter the
 authoritative graph. Before any operational count, filter, diagnostic,

@@ -26,6 +26,7 @@ def test_ci_covers_core_mcp_security_and_artifact_release_gates() -> None:
     workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
         encoding="utf-8"
     )
+    assert 'MEMDSL_RELEASE_VERSION: "0.9.0.dev0"' in workflow
     for version in ("3.9", "3.10", "3.11", "3.12"):
         assert f'"{version}"' in workflow
     assert 'python-version: ["3.10", "3.12"]' in workflow

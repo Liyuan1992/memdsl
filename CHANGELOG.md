@@ -9,9 +9,11 @@
 - The 0.8.0 authority contract remains frozen: legacy node relations keep their
   existing precedence, explicit `supersedes` does not suppress declarations,
   and review/audit state is not compiled as a digest-bound authority ledger.
-- Anonymous single-principal exploratory Pilot result: ADJUST. High-evidence
-  built-ins are `supports`, `depends_on`, `supersedes`, and `contradicts`;
-  lower-evidence relations such as `refines` remain experimental extensions.
+- Anonymous single-principal exploratory Pilot result: ADJUST. The first human
+  follow-up batch had 7 reviewable accepts (`supports` 4, `depends_on` 1,
+  `contradicts` 1, discovery-only `related` 1) and 3 invalid/unreviewable host
+  source-contamination rows excluded from the Edge denominator. `supersedes`
+  was not human-validated in this batch; every built-in remains experimental.
 
 ## 0.8.0 - 2026-07-14
 

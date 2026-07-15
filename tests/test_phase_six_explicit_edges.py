@@ -315,6 +315,10 @@ def test_relation_registry_has_pilot_minimum_and_refines_is_extension_only(
     builtins = {item.name for item in builtin_descriptors}
     assert builtins == {"supports", "depends_on", "supersedes", "contradicts"}
     assert {item.stability for item in builtin_descriptors} == {"experimental"}
+    assert workspace.registry.resolve_edge_relation("supersedes").stability == (
+        "experimental")
+    assert workspace.registry.resolve_edge_relation("related") is None
+    assert workspace.registry.resolve_edge_relation("related_to") is None
     assert workspace.registry.resolve_edge_relation("refines") is None
     extension = workspace.registry.resolve_edge_relation("lab.refines")
     assert extension is not None and extension.stability == "experimental"
@@ -884,6 +888,10 @@ def test_source_authority_limitation_is_behavioral_and_documented(
     assert "authoritative only as an audit record" in spec
     assert "It is not an input\n  to `CompiledWorkspace`" in spec
     assert "Risk matrix" in design
+    for text in (spec, api, design):
+        assert "did not validate `supersedes`" in text
+        assert "discovery-only" in text
+    assert "three were invalid or\nunreviewable source contamination" in design
 
 
 def test_explicit_edge_scale_indexes_and_trace_budgets_are_bounded(
