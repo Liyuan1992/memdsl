@@ -64,7 +64,7 @@ understanding, comparative effectiveness, or mechanized security follows.
 | Version contract | `0.9.0` across project, runtime, tests, and CI |
 | Fixed build epoch | `SOURCE_DATE_EPOCH=1784077269` |
 | Exact-commit source bytes | Two new independent clean roots from the commit containing this receipt reported the same tracked-source digest; all 109 tracked files used canonical LF bytes |
-| Build backend | Hatchling `1.31.0` exactly pinned in build-system and release environment; both builds used `python -m build --no-isolation` after the toolchain gate |
+| Build backend | Release archives use Hatchling `1.31.0` on Python 3.10+; Python 3.9 source/dev setup is pinned to compatible Hatchling `1.27.0` and cannot pass the release toolchain gate; both final builds used `python -m build --no-isolation` after that gate |
 | CLI / MCP inspect / real stdio | lint-demo produced the expected 2 errors / 3 warnings / exit 1; Query, Explain, Catalog, Trace, MCP inspect, and Phase 3-6 stdio passed |
 | Scoped denial and gated write | 23 targeted stdio, denial, pending-isolation, approval/confirmation, and review-floor cases passed |
 | Synthetic scale/security gates | 20 targeted bounded-scale, fail-closed, hidden-data, invalid-event, and no-auto-approval cases passed |
@@ -90,8 +90,8 @@ result does not create a self-referential artifact hash.
 
 | Archive | Bytes | Members | SHA-256 |
 | --- | ---: | ---: | --- |
-| `memdsl-0.9.0-py3-none-any.whl` | 330,980 | 44 | `a2c488b5e67c71b4d660a42ec64aa5d70fb27377c5bab3a43b0d0f7a19ec10ae` |
-| `memdsl-0.9.0.tar.gz` | 428,649 | 108 | `039d4736d2cd0d3670174d837eca0dd9fbaeb43fb7e06306f482705eb750c752` |
+| `memdsl-0.9.0-py3-none-any.whl` | 331,075 | 44 | `0e79d4bdf55f4c887eb08227ecc5ed4680d0000107ecf49504184373d6791003` |
+| `memdsl-0.9.0.tar.gz` | 429,044 | 108 | `c5d54f142dca6d1cf543f6713cc9b531c4796ea8d26d225ad1ec30fad3ba15d9` |
 
 Both archives must include the documentation index, practical design, explicit
 Edge design, release-scope freeze, SPEC, PUBLIC_API, UPGRADING, focused paper,

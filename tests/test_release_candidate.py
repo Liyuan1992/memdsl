@@ -10,6 +10,7 @@ import memdsl
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_VERSION = "0.9.0"
 EXPECTED_HATCHLING = "1.31.0"
+PY39_HATCHLING = "1.27.0"
 
 
 def test_release_version_is_consistent_across_runtime_and_project_metadata() -> None:
@@ -30,9 +31,10 @@ def test_release_source_bytes_and_build_backend_are_canonical() -> None:
     assert "*.cmd text eol=crlf" in attributes
 
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    exact = f'hatchling=={EXPECTED_HATCHLING}'
-    assert f'requires = ["{exact}"]' in pyproject
-    assert exact in pyproject
+    py39 = f"hatchling=={PY39_HATCHLING}; python_version < '3.10'"
+    release = f"hatchling=={EXPECTED_HATCHLING}; python_version >= '3.10'"
+    assert pyproject.count(f'"{py39}"') == 2
+    assert pyproject.count(f'"{release}"') == 2
 
 
 def test_ci_covers_core_mcp_security_and_artifact_release_gates() -> None:

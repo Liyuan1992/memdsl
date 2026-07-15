@@ -68,6 +68,7 @@ FORBIDDEN_SUFFIXES = {
 
 RELEASE_SOURCE_DATE_EPOCH = 1784077269
 RELEASE_HATCHLING_VERSION = "1.31.0"
+PY39_HATCHLING_VERSION = "1.27.0"
 EXPECTED_PAPER_WORDS = 5256
 
 REQUIRED_PAPER_MEMBER_SUFFIXES = {
@@ -266,11 +267,16 @@ def check_build_toolchain(repo_root: Path) -> None:
     """Verify the exact backend that produces wheel and sdist bytes."""
 
     pyproject = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
-    exact_requirement = f'hatchling=={RELEASE_HATCHLING_VERSION}'
-    if pyproject.count(f'"{exact_requirement}"') != 2:
-        raise AssertionError(
-            f"pyproject.toml must pin {exact_requirement} in build-system and dev"
-        )
+    requirements = (
+        f"hatchling=={PY39_HATCHLING_VERSION}; python_version < '3.10'",
+        f"hatchling=={RELEASE_HATCHLING_VERSION}; python_version >= '3.10'",
+    )
+    for requirement in requirements:
+        if pyproject.count(f'"{requirement}"') != 2:
+            raise AssertionError(
+                "pyproject.toml must pin "
+                f"{requirement} in both build-system and dev"
+            )
     try:
         installed = metadata.version("hatchling")
     except metadata.PackageNotFoundError as exc:

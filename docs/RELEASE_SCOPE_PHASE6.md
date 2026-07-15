@@ -95,9 +95,12 @@ no tracked Windows batch or PowerShell scripts; future `.bat` and `.cmd`
 launchers are explicitly reserved as CRLF, while PowerShell and shell sources
 remain LF. Manual conversion in one worktree is not release evidence.
 
-Hatchling `1.31.0` is the component that produces wheel and sdist bytes. It is
-therefore pinned exactly in both the PEP 517 build-system requirements and the
-release development environment. Release builds first run
+Hatchling `1.31.0` is the component that produces release wheel and sdist
+bytes. It is pinned for Python 3.10+ in both the PEP 517 build-system
+requirements and the release development environment. Python 3.9 source/dev
+setup uses the last compatible pinned backend, Hatchling `1.27.0`; that path
+may test the supported core runtime but is not authorized to produce release
+archives. Release builds first run
 `release_checks.py build-toolchain`, then invoke
 `python -m build --no-isolation`, so the checked backend is the backend that
 performs the build. The `build` frontend only invokes that backend, and `wheel`, installers,
