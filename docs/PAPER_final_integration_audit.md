@@ -4,7 +4,9 @@
 **Release line:** local `0.9.0.dev0` candidate<br>
 **Paper/candidate baseline:** `4ee810833ef0cbd8562e72e3ad202a07c5ce77e8`<br>
 **Experimental Edge implementation:** `6bc3ffd986b1ffe29cefa928642fd0cf47e5c2c9`<br>
-**Human-review reconciliation:** `4ec9d43fda56a277609dd822c61acdb9a7265655`
+**Human-review reconciliation:** `4ec9d43fda56a277609dd822c61acdb9a7265655`<br>
+**LF exact-byte remediation:** canonical clean-checkout baseline hashes were
+re-frozen in the final local commit containing this receipt
 
 ## Scope and ancestry
 
@@ -66,7 +68,8 @@ understanding, comparative effectiveness, or mechanized security follows.
 | CLI / MCP inspect / real stdio | lint-demo produced the expected 2 errors / 3 warnings / exit 1; Query, Explain, Catalog, Trace, MCP inspect, and Phase 3-6 stdio passed |
 | Scoped denial and gated write | 23 targeted stdio, denial, pending-isolation, approval/confirmation, and review-floor cases passed |
 | Synthetic scale/security gates | 20 targeted bounded-scale, fail-closed, hidden-data, invalid-event, and no-auto-approval cases passed |
-| CFF / paper / links / privacy | isolated `cffconvert==2.0.0` validation passed; 14 references, 24 claim rows, 5,250 manuscript words, links, license, privacy, and frozen hashes passed |
+| Canonical frozen baselines | Exact LF-byte SHA-256 values are `fad66899ce0e795efdbd0d3691d24d4b85414f4627c75d06abe826e165dbeca8`, `acb80fb9413f58944597b9f71b4f8e5ff71dd4a94ca91479c12982cb226c855d`, and `6d37c9f3eb55e35e8a8a7e40d6cd20bc59654b6d3f2d7d822c2b9d2a1b25b574`; no normalized-hash substitution is used |
+| CFF / paper / links / privacy | isolated `cffconvert==2.0.0` validation passed; 14 references, 24 claim rows, 5,250 manuscript words, links, license, privacy, and frozen paper plus exact-byte LF baseline hashes passed |
 | Twine and archive membership/privacy | Twine passed; wheel 44 members, sdist 108 members; required-member, host-marker, and privacy scans passed |
 | Reproducible double build | two independent final-commit clean roots with the same source digest and fixed epoch produced byte-identical wheel and sdist SHA-256 values |
 | Fresh wheel | imported from temporary `Lib/site-packages`; 17 installed docs; dependency, CLI, MCP inspect, v1/v2 stdio, scope denial, and workspace-v3 Edge CLI/MCP/stdio passed |
@@ -88,7 +91,7 @@ result does not create a self-referential artifact hash.
 | Archive | Bytes | Members | SHA-256 |
 | --- | ---: | ---: | --- |
 | `memdsl-0.9.0.dev0-py3-none-any.whl` | 330,917 | 44 | `f7898683450cca77729c8726c0ee69358a7fabb795ce6d687e206dacd8041421` |
-| `memdsl-0.9.0.dev0.tar.gz` | 428,514 | 108 | `f185c155994fe5878a6efbcfd2a64be20ef1e7da0fd4a27f6f28f54214a2c1c0` |
+| `memdsl-0.9.0.dev0.tar.gz` | 428,516 | 108 | `98aa22fd5d05b7054b5b92e38cc7c88177df60a9b7bb7707fec9b460de5fe977` |
 
 Both archives must include the documentation index, practical design, explicit
 Edge design, release-scope freeze, SPEC, PUBLIC_API, UPGRADING, focused paper,
@@ -111,8 +114,9 @@ runtime path is included in this audit or the release artifacts.
 ## Decision
 
 - **GO:** the local `0.9.0.dev0` Phase 6 mainline release candidate passes the
-  frozen implementation, compatibility, paper-boundary, exact-commit
-  reproducibility, archive, privacy, and fresh-install gates in this window.
+  frozen implementation, canonical LF exact-byte baselines, compatibility,
+  paper-boundary, exact-commit reproducibility, archive, privacy, and
+  fresh-install gates in this window.
 - **NO-GO:** push, tag, GitHub Release, PyPI, Zenodo, DOI, deployment, or public
   paper submission in this window.
 - **NO-GO:** describing experimental Edges as stable, automatic, or proof that

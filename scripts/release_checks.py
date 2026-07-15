@@ -99,9 +99,9 @@ PAPER_FROZEN_BLOB_HASHES = {
 }
 
 FROZEN_BASELINE_HASHES = {
-    "docs/baselines/phase_minus_one_0.6.0.json": "f34d21a32b033a524240b65002af180aa26e071fbf44385ad8679645d7b58e73",
-    "docs/baselines/PHASE_MINUS_ONE_SCALE_BASELINE.md": "3c6f1de4efe2a47a6288c72e4e2dddc6f0ffb9d4f86ff431e99eeb32e2389ad2",
-    "benchmarks/phase_minus_one_baseline.py": "13e7d112b0ebfe339195530311dd4b7ac0e37f60054113753b5e85772aa32ab1",
+    "docs/baselines/phase_minus_one_0.6.0.json": "fad66899ce0e795efdbd0d3691d24d4b85414f4627c75d06abe826e165dbeca8",
+    "docs/baselines/PHASE_MINUS_ONE_SCALE_BASELINE.md": "acb80fb9413f58944597b9f71b4f8e5ff71dd4a94ca91479c12982cb226c855d",
+    "benchmarks/phase_minus_one_baseline.py": "6d37c9f3eb55e35e8a8a7e40d6cd20bc59654b6d3f2d7d822c2b9d2a1b25b574",
 }
 
 PAPER_MARKDOWN_FILES = {
