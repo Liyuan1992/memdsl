@@ -53,20 +53,22 @@ understanding, comparative effectiveness, or mechanized security follows.
 
 | Gate | Result |
 | --- | --- |
-| Full regression | `403 passed`; `0 xfail` |
+| Full regression | `404 passed`; `0 xfail` |
 | Focused Phase 6 | `47 passed` |
-| Focused release/static/public API | `6 passed` (`53 passed` when run together with Phase 6) |
+| Focused release/static/public API | `7 passed` (`54 passed` when run together with Phase 6) |
 | Compile | `compileall -q src tests scripts` passed |
 | Python compatibility | Python 3.9 AST gate passed for 22 source files |
 | Dependency integrity | `pip check`: no broken requirements |
 | Version contract | `0.9.0.dev0` across project, runtime, tests, and CI |
 | Fixed build epoch | `SOURCE_DATE_EPOCH=1784077269` |
+| Exact-commit source bytes | Two new independent clean roots from the commit containing this receipt reported the same tracked-source digest; all 109 tracked files used canonical LF bytes |
+| Build backend | Hatchling `1.31.0` exactly pinned in build-system and release environment; both builds used `python -m build --no-isolation` after the toolchain gate |
 | CLI / MCP inspect / real stdio | lint-demo produced the expected 2 errors / 3 warnings / exit 1; Query, Explain, Catalog, Trace, MCP inspect, and Phase 3-6 stdio passed |
 | Scoped denial and gated write | 23 targeted stdio, denial, pending-isolation, approval/confirmation, and review-floor cases passed |
 | Synthetic scale/security gates | 20 targeted bounded-scale, fail-closed, hidden-data, invalid-event, and no-auto-approval cases passed |
 | CFF / paper / links / privacy | isolated `cffconvert==2.0.0` validation passed; 14 references, 24 claim rows, 5,250 manuscript words, links, license, privacy, and frozen hashes passed |
-| Twine and archive membership/privacy | Twine passed; wheel 44 members, sdist 107 members; required-member, host-marker, and privacy scans passed |
-| Reproducible double build | two fixed-epoch builds produced byte-identical wheel and sdist SHA-256 values |
+| Twine and archive membership/privacy | Twine passed; wheel 44 members, sdist 108 members; required-member, host-marker, and privacy scans passed |
+| Reproducible double build | two independent final-commit clean roots with the same source digest and fixed epoch produced byte-identical wheel and sdist SHA-256 values |
 | Fresh wheel | imported from temporary `Lib/site-packages`; 17 installed docs; dependency, CLI, MCP inspect, v1/v2 stdio, scope denial, and workspace-v3 Edge CLI/MCP/stdio passed |
 | Diff and clean-state checks | `git diff --check` passed; protected launch article absent from this worktree and staging; the release commit left the worktree clean |
 
@@ -77,13 +79,16 @@ CLI/MCP/stdio contract.
 
 ## Final local archives
 
-The final wheel and sdist were built twice with the frozen epoch. Both builds
-matched byte for byte.
+The final wheel and sdist were built in two new, independent clean source roots
+from the commit containing this receipt. Both roots passed the canonical
+source-byte and exact-backend gates, used the frozen epoch, and matched byte
+for byte. This receipt remains excluded from both archives, so recording the
+result does not create a self-referential artifact hash.
 
 | Archive | Bytes | Members | SHA-256 |
 | --- | ---: | ---: | --- |
-| `memdsl-0.9.0.dev0-py3-none-any.whl` | 332,519 | 44 | `662233cc14d4688de728f61d162e7403f1cdd898780f0114d2f976eb0e51aaac` |
-| `memdsl-0.9.0.dev0.tar.gz` | 429,685 | 107 | `ba94d0281f0a870d5f228b6d4143d974caf7918f0d4c0299f76dd117e8155a14` |
+| `memdsl-0.9.0.dev0-py3-none-any.whl` | 330,917 | 44 | `f7898683450cca77729c8726c0ee69358a7fabb795ce6d687e206dacd8041421` |
+| `memdsl-0.9.0.dev0.tar.gz` | 428,514 | 108 | `f185c155994fe5878a6efbcfd2a64be20ef1e7da0fd4a27f6f28f54214a2c1c0` |
 
 Both archives must include the documentation index, practical design, explicit
 Edge design, release-scope freeze, SPEC, PUBLIC_API, UPGRADING, focused paper,
@@ -106,8 +111,8 @@ runtime path is included in this audit or the release artifacts.
 ## Decision
 
 - **GO:** the local `0.9.0.dev0` Phase 6 mainline release candidate passes the
-  frozen implementation, compatibility, paper-boundary, reproducibility,
-  archive, privacy, and fresh-install gates in this window.
+  frozen implementation, compatibility, paper-boundary, exact-commit
+  reproducibility, archive, privacy, and fresh-install gates in this window.
 - **NO-GO:** push, tag, GitHub Release, PyPI, Zenodo, DOI, deployment, or public
   paper submission in this window.
 - **NO-GO:** describing experimental Edges as stable, automatic, or proof that

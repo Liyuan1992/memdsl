@@ -7,9 +7,11 @@ import ast
 import hashlib
 import os
 import re
+import subprocess
 import sys
 import tarfile
 import zipfile
+from importlib import metadata
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -65,6 +67,7 @@ FORBIDDEN_SUFFIXES = {
 }
 
 RELEASE_SOURCE_DATE_EPOCH = 1784077269
+RELEASE_HATCHLING_VERSION = "1.31.0"
 EXPECTED_PAPER_WORDS = 5250
 
 REQUIRED_PAPER_MEMBER_SUFFIXES = {
@@ -169,6 +172,119 @@ def check_source_date_epoch() -> None:
             f"SOURCE_DATE_EPOCH {value} != frozen {RELEASE_SOURCE_DATE_EPOCH}"
         )
     print(f"source_date_epoch={value}")
+
+
+def _git_stdout(repo_root: Path, *args: str) -> bytes:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(repo_root),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.decode("utf-8", errors="replace")
+        raise AssertionError(f"git {' '.join(args)} failed: {stderr.strip()}")
+    return result.stdout
+
+
+def check_source_tree(repo_root: Path) -> None:
+    """Verify canonical checkout bytes and print a path-independent digest."""
+
+    tracked = [
+        item.decode("utf-8")
+        for item in _git_stdout(repo_root, "ls-files", "-z").split(b"\0")
+        if item
+    ]
+    if not tracked:
+        raise AssertionError("no tracked source files found")
+    if "docs/launch_article_zh.md" in {item.lower() for item in tracked}:
+        raise AssertionError("protected launch article must not be tracked")
+
+    failures: List[str] = []
+    lf_files = 0
+    crlf_files = 0
+    binary_files = 0
+    records = _git_stdout(repo_root, "ls-files", "--eol", "-z")
+    for raw_record in records.split(b"\0"):
+        if not raw_record:
+            continue
+        record = raw_record.decode("utf-8")
+        if "\t" not in record:
+            failures.append(f"unrecognized git eol record: {record!r}")
+            continue
+        eol_fields, relative = record.split("\t", 1)
+        match = re.match(
+            r"^i/(\S+)\s+w/(\S+)\s+attr/(.*)$", eol_fields.strip()
+        )
+        if match is None:
+            failures.append(f"unrecognized git eol metadata for {relative}")
+            continue
+        index_eol, worktree_eol, attributes = match.groups()
+        if index_eol == "-text" or worktree_eol == "-text":
+            binary_files += 1
+            continue
+        if index_eol not in {"lf", "none"}:
+            failures.append(f"{relative}: Git index uses {index_eol}, expected LF")
+        if "eol=crlf" in attributes:
+            crlf_files += 1
+            if worktree_eol not in {"crlf", "none"}:
+                failures.append(
+                    f"{relative}: worktree uses {worktree_eol}, expected CRLF"
+                )
+            continue
+        lf_files += 1
+        if "eol=lf" not in attributes:
+            failures.append(f"{relative}: missing repository eol=lf contract")
+        if worktree_eol not in {"lf", "none"}:
+            failures.append(f"{relative}: worktree uses {worktree_eol}, expected LF")
+
+    digest = hashlib.sha256()
+    total_bytes = 0
+    for relative in tracked:
+        path = repo_root.joinpath(*relative.split("/"))
+        if not path.is_file():
+            failures.append(f"tracked source is not a regular file: {relative}")
+            continue
+        payload = path.read_bytes()
+        encoded_path = relative.encode("utf-8")
+        digest.update(len(encoded_path).to_bytes(4, "big"))
+        digest.update(encoded_path)
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+        total_bytes += len(payload)
+
+    if failures:
+        raise AssertionError("source tree checks failed:\n- " + "\n- ".join(failures))
+    print(f"source_files={len(tracked)}")
+    print(f"source_bytes={total_bytes}")
+    print(f"source_sha256={digest.hexdigest()}")
+    print(f"source_line_endings=lf:{lf_files},crlf:{crlf_files},binary:{binary_files}")
+
+
+def check_build_toolchain(repo_root: Path) -> None:
+    """Verify the exact backend that produces wheel and sdist bytes."""
+
+    pyproject = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+    exact_requirement = f'hatchling=={RELEASE_HATCHLING_VERSION}'
+    if pyproject.count(f'"{exact_requirement}"') != 2:
+        raise AssertionError(
+            f"pyproject.toml must pin {exact_requirement} in build-system and dev"
+        )
+    try:
+        installed = metadata.version("hatchling")
+    except metadata.PackageNotFoundError as exc:
+        raise AssertionError("hatchling is not installed in the release environment") from exc
+    if installed != RELEASE_HATCHLING_VERSION:
+        raise AssertionError(
+            f"hatchling {installed} != frozen {RELEASE_HATCHLING_VERSION}"
+        )
+    print(f"hatchling={installed}")
+    try:
+        print(f"build_frontend={metadata.version('build')}")
+    except metadata.PackageNotFoundError:
+        print("build_frontend=not-installed")
+    print("artifact_byte_producer=hatchling")
 
 
 def _sha256(path: Path) -> str:
@@ -280,6 +396,10 @@ def check_paper(repo_root: Path) -> None:
         "reject=0",
         "relation_edge_event",
         "edge_lifecycle",
+        "Exact-commit build contract",
+        "Hatchling `1.31.0`",
+        "release_checks.py source-tree",
+        "python -m build --no-isolation",
         "4ee810833ef0cbd8562e72e3ad202a07c5ce77e8",
         "6bc3ffd986b1ffe29cefa928642fd0cf47e5c2c9",
         "4ec9d43fda56a277609dd822c61acdb9a7265655",
@@ -496,6 +616,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("source-date-epoch")
 
+    subparsers.add_parser("source-tree")
+
+    subparsers.add_parser("build-toolchain")
+
     subparsers.add_parser("paper")
 
     artifacts = subparsers.add_parser("artifacts")
@@ -513,6 +637,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         check_python39_ast(repo_root)
     elif args.command == "source-date-epoch":
         check_source_date_epoch()
+    elif args.command == "source-tree":
+        check_source_tree(repo_root)
+    elif args.command == "build-toolchain":
+        check_build_toolchain(repo_root)
     elif args.command == "paper":
         check_paper(repo_root)
     elif args.command == "artifacts":

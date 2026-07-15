@@ -42,6 +42,8 @@ jobs:
           python -m compileall -q src tests scripts
           python scripts/release_checks.py python39-ast
           python scripts/release_checks.py source-date-epoch
+          python scripts/release_checks.py source-tree
+          python scripts/release_checks.py build-toolchain
           python scripts/release_checks.py paper
           python -m pip check
           git diff --check
@@ -51,7 +53,7 @@ jobs:
       - name: Build, Twine, member listing, and privacy scan
         run: |
           TAG="${GITHUB_REF_NAME#v}"
-          python -m build
+          python -m build --no-isolation
           python -m twine check dist/*
           python scripts/release_checks.py artifacts --dist dist --expected "$TAG"
 

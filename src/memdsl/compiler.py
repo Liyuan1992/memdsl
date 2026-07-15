@@ -170,7 +170,11 @@ ExplicitEdgeIndex = Mapping[str, Tuple[CompiledExplicitEdge, ...]]
 
 @dataclass(frozen=True)
 class CompiledWorkspace:
-    """Internal immutable index envelope over one source workspace."""
+    """Public immutable, rebuildable index handle over one source workspace.
+
+    Source declarations remain the normative authority; this handle and its
+    indexes can be discarded and deterministically rebuilt from that source.
+    """
 
     source_fingerprint: str
     declarations: Tuple[Declaration, ...]

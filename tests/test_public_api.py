@@ -8,6 +8,10 @@ def test_v09_experimental_public_contract_preserves_v08_exports():
     assert memdsl.Declaration is not None
     assert memdsl.CompiledWorkspace is not None
     assert callable(memdsl.compile_workspace)
+    compiled_doc = (memdsl.CompiledWorkspace.__doc__ or "").lower()
+    assert "public immutable, rebuildable index handle" in compiled_doc
+    assert "source declarations remain the normative authority" in compiled_doc
+    assert "internal" not in compiled_doc
     assert memdsl.EvidencePack is not None
     assert memdsl.ReviewStore is not None
     assert memdsl.Proposal is not None

@@ -1,0 +1,7 @@
+# Release inputs use the same bytes in every clean checkout.
+* text=auto eol=lf
+
+# cmd.exe batch launchers conventionally require CRLF. PowerShell and shell
+# sources remain LF and are supported that way on every release platform.
+*.bat text eol=crlf
+*.cmd text eol=crlf

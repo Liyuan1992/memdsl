@@ -86,6 +86,29 @@ memdsl core does not ship such a generator.
   generation, complete private-memory understanding, production queue
   economics, or the paper's planned authority runtime.
 
+## Exact-commit build contract
+
+A release source tree is canonical only when it is a fresh checkout of the
+exact commit and passes `python scripts/release_checks.py source-tree`.
+`.gitattributes` fixes tracked text to LF on every platform. The repository has
+no tracked Windows batch or PowerShell scripts; future `.bat` and `.cmd`
+launchers are explicitly reserved as CRLF, while PowerShell and shell sources
+remain LF. Manual conversion in one worktree is not release evidence.
+
+Hatchling `1.31.0` is the component that produces wheel and sdist bytes. It is
+therefore pinned exactly in both the PEP 517 build-system requirements and the
+release development environment. Release builds first run
+`release_checks.py build-toolchain`, then invoke
+`python -m build --no-isolation`, so the checked backend is the backend that
+performs the build. The `build` frontend only invokes that backend, and `wheel`, installers,
+Twine, and pip do not generate the Hatchling archive bytes; they remain
+verification or installation tools and are not part of the byte-producing
+pin.
+
+The fixed `SOURCE_DATE_EPOCH`, canonical source digest, backend version, and
+artifact hashes must agree across two new, independent clean source roots from
+the final commit before the receipt can authorize another independent review.
+
 ## Release boundary
 
 The local candidate may be accepted only if the full synthetic CLI/MCP,

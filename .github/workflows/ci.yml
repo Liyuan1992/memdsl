@@ -107,6 +107,8 @@ jobs:
           python scripts/release_checks.py version --expected ${{ env.MEMDSL_RELEASE_VERSION }}
           python scripts/release_checks.py python39-ast
           python scripts/release_checks.py source-date-epoch
+          python scripts/release_checks.py source-tree
+          python scripts/release_checks.py build-toolchain
           python scripts/release_checks.py paper
           python -m compileall -q src tests scripts
           python -m pip check
@@ -117,7 +119,7 @@ jobs:
           python -m pytest -q tests/test_phase_minus_one_characterization.py tests/test_phase_two_catalog_budget.py tests/test_phase_three_indexed_query_trace.py tests/test_phase_four_use_dialect.py tests/test_phase_five_quarantine_enforcement.py tests/test_phase_six_explicit_edges.py
       - name: Build, Twine, member listing, and privacy scan
         run: |
-          python -m build
+          python -m build --no-isolation
           python -m twine check dist/*
           python scripts/release_checks.py artifacts --dist dist --expected ${{ env.MEMDSL_RELEASE_VERSION }}
       - name: Outside-repo fresh wheel and real MCP stdio smoke
