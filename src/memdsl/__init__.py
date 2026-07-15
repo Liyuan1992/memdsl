@@ -10,6 +10,7 @@ policies may auto-approve only narrowly scoped candidate assertions.
 """
 
 from memdsl.parser import parse_file, parse_text, ParseError
+from memdsl.compiler import CompiledWorkspace, compile_workspace
 from memdsl.model import (
     Declaration,
     EdgeLifecycleEvent,
@@ -109,6 +110,8 @@ __all__ = [
     "parse_file",
     "parse_text",
     "ParseError",
+    "CompiledWorkspace",
+    "compile_workspace",
     "Workspace",
     "Declaration",
     "ExplicitEdge",

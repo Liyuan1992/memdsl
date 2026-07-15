@@ -1,19 +1,30 @@
 # memdsl Public Python API
 
-Release baseline: memdsl 0.8.0, 2026-07-14.
+Release baseline: stable 0.8 contracts plus the unreleased `0.9.0.dev0`
+experimental Edge extension, 2026-07-15.
 
-Stable 0.8 contracts include the v1 compatibility/authority surfaces, Catalog
-v1, Trace v1, indexed query/search trace, report diagnostics, workspace v2,
-exact `use`, `dialect_mapping`, `ViewContext`/`ResolvedView`, and explicit
-opt-in v2 read schemas. Map v1 remains supported throughout the 0.8 line and
-will not be reconsidered for removal before 1.0. There is no separate 0.7.0
-release.
+Stable 0.8 contracts include Source authority and review-gated writes,
+`CompiledWorkspace` / `compile_workspace`, the v1 compatibility/authority
+surfaces, Catalog v1, Trace v1, indexed query/search trace, report diagnostics,
+workspace v2, exact `use`, `dialect_mapping`, `ViewContext`/`ResolvedView`, and
+explicit opt-in v2 read schemas. Map v1 remains supported throughout the 0.8
+line and will not be reconsidered for removal before 1.0. There is no separate
+0.7.0 release.
 
 Quarantine/strict rollout quality, dialect-candidate learning, and
 host-attested principal integration remain experimental and opt-in; their
 authorization, completeness, authority, and repair safety invariants remain
-normative. `CompiledWorkspace`, compiler/cache/index shapes, contract strings,
-complexity constants, and synthetic timing are not public API.
+normative. `CompiledWorkspace` is a public rebuildable handle, but cache/index
+layout details, compiler contract strings, complexity constants, and synthetic
+timing are not public API or performance SLAs.
+
+The `0.9.0.dev0` workspace-v3 explicit Edge surface is experimental. Automatic
+dialect learning, automatic Edge candidate generation, inferred authoritative
+edges, stable Edge promotion, and Phase 7 cold-history/incremental compilation
+are planned rather than shipped. Host extraction, sanitization, private schema,
+policy, sample, and runtime-adapter behavior is excluded from the package
+contract and is not a memdsl release gate. See
+[the release-scope matrix](RELEASE_SCOPE_PHASE6.md).
 
 The dependency-free core API supports Python 3.9+. The optional
 `memdsl[mcp]` extra and `memdsl-mcp` server require Python 3.10+ because
@@ -38,6 +49,7 @@ from memdsl import (
     RESOLVED_VIEW_SCHEMA,
     AuditLogError,
     CatalogCursorError,
+    CompiledWorkspace,
     CompliancePack,
     Declaration,
     EvidencePack,
@@ -71,6 +83,7 @@ from memdsl import (
     build_resolved_query,
     build_memory_catalog,
     build_memory_map,
+    compile_workspace,
     check_compliance,
     declaration_content_hash,
     lint,
@@ -144,7 +157,8 @@ subject/dialect routing effects. Quarantine is a separate workspace-v2 opt-in un
 `enforcement.mode`; strict linking does not imply strict enforcement.
 `Workspace.schema_version`, `Workspace.linking_visibility`,
 `Workspace.enforcement_mode`, and MCP status fields expose the selected source
-contract. `CompiledWorkspace` remains non-public.
+contract. `CompiledWorkspace` is public as a rebuildable compilation handle;
+its container and index layout is not a serialized compatibility contract.
 
 Workspace-owned dialect types opt in with the generic `dialect_mapping`
 capability. Only active, unrestricted, valid, unambiguous positive mappings to
@@ -169,10 +183,10 @@ visibility diagnostics are warnings in v2 report mode and errors in strict
 mode where applicable. Ambiguous dialect mappings are warnings but never route;
 invalid or unsupported-polarity mappings are errors.
 
-Version 0.8 exports `ViewContext`, `ResolvedView`, `resolve_view()`,
-`RESOLVED_VIEW_SCHEMA`, and the immutable `ENFORCEMENT_TABLE` to package-root
-public API. `CompiledWorkspace` remains an implementation type; callers may
-pass `Workspace` directly to `resolve_view()`.
+Version 0.8 exports `CompiledWorkspace`, `compile_workspace()`, `ViewContext`,
+`ResolvedView`, `resolve_view()`, `RESOLVED_VIEW_SCHEMA`, and the immutable
+`ENFORCEMENT_TABLE` to package-root public API. Callers may still pass
+`Workspace` directly to `resolve_view()`.
 
 ### Opt-in resolved read path
 
@@ -302,7 +316,8 @@ representation. `CatalogCursorError.code` is `invalid_cursor`,
 view id changed and pagination must restart. Passing a report View preserves
 `memdsl.catalog.v1`; passing an enforced ResolvedView returns
 `memdsl.catalog.v2` (`CATALOG_SCHEMA_V2`) with quarantine-aware counts and
-metadata. `CompiledWorkspace` remains internal.
+metadata. The public `CompiledWorkspace` handle remains rebuildable; its
+individual index containers remain implementation details.
 
 The map is a navigation projection. It includes the shared current service set
 after lifecycle-safe supersede exclusion and makes lifecycle status explicit;

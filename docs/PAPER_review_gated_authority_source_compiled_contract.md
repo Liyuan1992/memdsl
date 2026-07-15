@@ -372,12 +372,33 @@ The implementation status is deliberately split by immutable tag or commit:
 | status | exact evidence | scope |
 | --- | --- | --- |
 | shipped software | tag `v0.6.0`, commit `72274d9d4f065b76bceaf30f529dcbd47b3f3e18` | public 0.6.0 baseline |
-| implemented source line | Phase -1 through Phase 5 ending at `8e7c84815897ad13f89522e9e3b1edd0fcdb37b0` | `CompiledWorkspace`, Catalog, Trace, exact `use`, Dialect, opt-in quarantine/`ResolvedView` |
-| unreleased local candidate | `091b4736e02969ccdd198cfcb30ba9038feb78db` | 0.8.0 integration and local release evidence only |
-| deferred implementation | audit `ff9ff8a7dfe983a9db3caaf221d7315cfda8eba6` | Phase 6 first-class edges and Phase 7 cold-history/incremental compilation |
+| stable/public implementation line | Phase -1 through Phase 5, integrated by `4ee810833ef0cbd8562e72e3ad202a07c5ce77e8` | Source/review authority boundary, public `CompiledWorkspace`, Catalog, Query, Trace, exact `use`, Dialect, and opt-in quarantine/`ResolvedView` |
+| experimental Phase 6 | `6bc3ffd986b1ffe29cefa928642fd0cf47e5c2c9`, reconciled by `4ec9d43fda56a277609dd822c61acdb9a7265655` | opt-in workspace-v3 explicit Edge records/events/evidence/lifecycle and permanent human-review floor; not stable and not paper-authority conformance |
+| unreleased local candidate | `0.9.0.dev0` release-scope freeze after `4ec9d43fda56a277609dd822c61acdb9a7265655` | local implementation and release evidence only; no remote release or deployment claim |
+| deferred implementation | current release-scope freeze | Phase 7 cold-history/incremental compilation, automatic dialect learning, automatic Edge candidates, and the paper authority runtime |
 | planned paper contract | manuscript source `3535bfb9661724818011f4bf2823ed09e895069a` plus this metadata revision | `L_auth`, digest-bound grants, proofs, live reduction closure, and checked sinks |
 
 memdsl is a **reference implementation target**, not a conforming implementation. The candidate lacks the ledger, `(p,h)` checkouts, digest-bound grants, proof objects, live reduction closure, and `Verify` sinks. Legacy `active` declarations are not silently ratified. The [artifact manifest](PAPER_reproducibility_and_release_metadata.md) gives the exact mapping and synthetic baseline; the practical [source/compiled-view design](DESIGN_memory_source_compiled_view.md) remains a separate companion.
+
+### 6.1 Anonymous Phase 6 engineering observation
+
+The reference-implementation line includes one anonymous, single-principal
+exploratory follow-up over proposed explicit Edges. The first completed human
+batch produced `accept=7`, `uncertain=3`, and `reject=0`. The uncertain items
+were invalid or unreviewable source contamination rather than negative Edge
+judgments. The observation supports a narrow **ADJUST** conclusion:
+independently reviewable Edges can be useful, while automatic candidate
+coverage, relation choice, and evidence stability remain insufficient for
+automatic activation.
+
+This is not a comparative result, a human-subjects study, a representative
+sample, or evidence for the paper's grant/proof contract. Selection and
+extraction preceded review; the sample is small and single-principal;
+contamination was excluded from the Edge denominator; `supersedes` received no
+direct human validation; and no production queue-economics or cross-workspace
+generalization is available. Host-specific extraction and sanitization gates
+remain outside the memdsl artifact and do not block the generic local release
+candidate.
 
 ## 7. Evaluation
 
@@ -453,7 +474,7 @@ Source compilation does not prove memory true or issue authority; it is an enfor
 
 ## Declarations
 
-`liyuan` and Independent Researcher are placeholders; no institution, email, ORCID, DOI, funding, or COI conclusion is asserted pending author confirmation. OpenAI Codex assisted with repository inspection, drafting, consistency checks, and local verification; the human author remains responsible for claims and publication. No human-subjects study or human-derived result is reported, and the artifact uses synthetic/public material rather than a private memory workspace or personal dataset.
+`liyuan` and Independent Researcher are placeholders; no institution, email, ORCID, DOI, funding, or COI conclusion is asserted pending author confirmation. OpenAI Codex assisted with repository inspection, drafting, consistency checks, and local verification; the human author remains responsible for claims and publication. No human-subjects study is reported. The only human-reviewed engineering observation is the anonymous aggregate in Section 6.1; the artifact contains no private memory workspace, row-level evidence, identifier mapping, or personal dataset.
 
 ## References
 

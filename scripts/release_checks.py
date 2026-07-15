@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import os
 import re
 import sys
 import tarfile
@@ -31,6 +32,7 @@ FORBIDDEN_BASENAMES = {
     ".netrc",
     ".npmrc",
     ".pypirc",
+    "agents.md",
     "approved.mem",
     "credentials.json",
     "id_ed25519",
@@ -62,27 +64,35 @@ FORBIDDEN_SUFFIXES = {
     ".xlsx",
 }
 
+RELEASE_SOURCE_DATE_EPOCH = 1784077269
+EXPECTED_PAPER_WORDS = 5250
+
 REQUIRED_PAPER_MEMBER_SUFFIXES = {
     "CITATION.cff",
     "LICENSE",
     "DOCUMENTATION_INDEX.md",
     "DESIGN_memory_source_compiled_view.md",
+    "DESIGN_explicit_edges_phase6.md",
     "PAPER_LICENSE.md",
     "PAPER_publication_readiness_audit.md",
     "PAPER_related_work_claim_ledger.md",
     "PAPER_reproducibility_and_release_metadata.md",
     "PAPER_review_gated_authority_source_compiled_contract.md",
+    "PUBLIC_API.md",
+    "RELEASE_SCOPE_PHASE6.md",
+    "SPEC.md",
+    "UPGRADING.md",
     "baselines/PHASE_MINUS_ONE_SCALE_BASELINE.md",
     "baselines/phase_minus_one_0.6.0.json",
     "benchmarks/phase_minus_one_baseline.py",
 }
 
-P5_FROZEN_BLOB_HASHES = {
+PAPER_FROZEN_BLOB_HASHES = {
     "CITATION.cff": "10d97f3146253555f06b52edc85dcf45053f39c55a3530ac55e060eca7a97499",
-    "docs/PAPER_publication_readiness_audit.md": "8543e2ad3c3323be0d28360b7610ee751d4d273e64a2ecfa39553c093d13033e",
+    "docs/PAPER_publication_readiness_audit.md": "c4a2cfad7e6462abeffb0b38615cc2511cf5a7a5e8910c51599908737af6e837",
     "docs/PAPER_related_work_claim_ledger.md": "0704562e6a7631e78ec369970e65f591563c42289b8746eb96c9dd1ee134190c",
-    "docs/PAPER_reproducibility_and_release_metadata.md": "3ac7b40dbcc4801bcf53f02ed14300297e94c27891e0c16719dc331c46c28043",
-    "docs/PAPER_review_gated_authority_source_compiled_contract.md": "e2b90c5b4b5fceba187038d86277b3023731c218b28de00ddaea0d0250b50318",
+    "docs/PAPER_reproducibility_and_release_metadata.md": "083ef73a0d99d5dec8ca0969bc1753faea2f5a7de4951009901be1c5f7a90c30",
+    "docs/PAPER_review_gated_authority_source_compiled_contract.md": "133d489ed6d8bc016de246cbf87f33dc083d09d7b9092a11456ae3c736317a45",
 }
 
 FROZEN_BASELINE_HASHES = {
@@ -95,11 +105,16 @@ PAPER_MARKDOWN_FILES = {
     "README.md",
     "docs/DOCUMENTATION_INDEX.md",
     "docs/DESIGN_memory_source_compiled_view.md",
+    "docs/DESIGN_explicit_edges_phase6.md",
     "docs/PAPER_LICENSE.md",
     "docs/PAPER_publication_readiness_audit.md",
     "docs/PAPER_related_work_claim_ledger.md",
     "docs/PAPER_reproducibility_and_release_metadata.md",
     "docs/PAPER_review_gated_authority_source_compiled_contract.md",
+    "docs/PUBLIC_API.md",
+    "docs/RELEASE_SCOPE_PHASE6.md",
+    "docs/SPEC.md",
+    "docs/UPGRADING.md",
 }
 
 
@@ -144,6 +159,18 @@ def check_python39_ast(repo_root: Path) -> None:
     print(f"python39_ast_files={len(source_files)}")
 
 
+def check_source_date_epoch() -> None:
+    raw = os.environ.get("SOURCE_DATE_EPOCH", "")
+    if not raw.isdigit():
+        raise AssertionError("SOURCE_DATE_EPOCH must be a positive integer")
+    value = int(raw)
+    if value != RELEASE_SOURCE_DATE_EPOCH:
+        raise AssertionError(
+            f"SOURCE_DATE_EPOCH {value} != frozen {RELEASE_SOURCE_DATE_EPOCH}"
+        )
+    print(f"source_date_epoch={value}")
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -181,7 +208,7 @@ def _check_markdown_links(repo_root: Path, paths: Iterable[str]) -> List[str]:
 def check_paper(repo_root: Path) -> None:
     failures: List[str] = []
     required_paths = (
-        set(P5_FROZEN_BLOB_HASHES)
+        set(PAPER_FROZEN_BLOB_HASHES)
         | set(FROZEN_BASELINE_HASHES)
         | PAPER_MARKDOWN_FILES
         | {"LICENSE", "pyproject.toml"}
@@ -193,7 +220,7 @@ def check_paper(repo_root: Path) -> None:
     if failures:
         raise AssertionError("paper checks failed:\n- " + "\n- ".join(failures))
 
-    for relative, expected in P5_FROZEN_BLOB_HASHES.items():
+    for relative, expected in PAPER_FROZEN_BLOB_HASHES.items():
         actual = _sha256_normalized_text(repo_root / relative)
         if actual != expected:
             failures.append(f"{relative}: sha256 {actual} != {expected}")
@@ -223,8 +250,11 @@ def check_paper(repo_root: Path) -> None:
             + ", ".join(sorted(expected_references - cited_numbers))
         )
     manuscript_words = len(re.findall(r"\S+", manuscript))
-    if manuscript_words != 5052:
-        failures.append(f"manuscript whitespace words={manuscript_words} expected=5052")
+    if manuscript_words != EXPECTED_PAPER_WORDS:
+        failures.append(
+            f"manuscript whitespace words={manuscript_words} "
+            f"expected={EXPECTED_PAPER_WORDS}"
+        )
 
     ledger = (repo_root / "docs/PAPER_related_work_claim_ledger.md").read_text(
         encoding="utf-8"
@@ -237,6 +267,25 @@ def check_paper(repo_root: Path) -> None:
             f"claim ledger rows={len(claim_ids)} unique={len(set(claim_ids))} expected=24"
         )
 
+    release_scope = (repo_root / "docs/RELEASE_SCOPE_PHASE6.md").read_text(
+        encoding="utf-8"
+    )
+    for required in (
+        "Stable/public",
+        "Experimental",
+        "Planned / not shipped",
+        "Host-specific / excluded",
+        "accept=7",
+        "uncertain=3",
+        "reject=0",
+        "relation_edge_event",
+        "edge_lifecycle",
+        "4ee810833ef0cbd8562e72e3ad202a07c5ce77e8",
+        "6bc3ffd986b1ffe29cefa928642fd0cf47e5c2c9",
+        "4ec9d43fda56a277609dd822c61acdb9a7265655",
+    ):
+        if required not in release_scope:
+            failures.append(f"RELEASE_SCOPE_PHASE6.md missing contract text: {required}")
     citation = (repo_root / "CITATION.cff").read_text(encoding="utf-8")
     for required in (
         "cff-version: 1.2.0",
@@ -269,8 +318,9 @@ def check_paper(repo_root: Path) -> None:
         basename = Path(suffix).name
         if basename not in pyproject:
             failures.append(f"pyproject.toml does not package {basename}")
-    if 'exclude = ["/docs/PAPER_final_integration_audit.md"]' not in pyproject:
-        failures.append("pyproject.toml does not exclude the self-referential P6 receipt")
+    for excluded in ("/AGENTS.md", "/docs/PAPER_final_integration_audit.md"):
+        if f'"{excluded}"' not in pyproject:
+            failures.append(f"pyproject.toml does not exclude {excluded}")
 
     failures.extend(_check_markdown_links(repo_root, PAPER_MARKDOWN_FILES))
 
@@ -444,6 +494,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("python39-ast")
 
+    subparsers.add_parser("source-date-epoch")
+
     subparsers.add_parser("paper")
 
     artifacts = subparsers.add_parser("artifacts")
@@ -459,6 +511,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         check_version(repo_root, args.expected)
     elif args.command == "python39-ast":
         check_python39_ast(repo_root)
+    elif args.command == "source-date-epoch":
+        check_source_date_epoch()
     elif args.command == "paper":
         check_paper(repo_root)
     elif args.command == "artifacts":

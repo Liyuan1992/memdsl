@@ -14,6 +14,13 @@
   `contradicts` 1, discovery-only `related` 1) and 3 invalid/unreviewable host
   source-contamination rows excluded from the Edge denominator. `supersedes`
   was not human-validated in this batch; every built-in remains experimental.
+- Froze one auditable release matrix: stable/public Source, review, public
+  rebuildable `CompiledWorkspace`, and v1/v2 navigation/read contracts;
+  experimental workspace-v3 Edges; planned automatic learning/candidates and
+  Phase 7; host-specific extraction/sanitization/private adapters excluded.
+- Added the Phase 6 gate to publish workflows, fixed documentation/package
+  membership drift, and required a fixed `SOURCE_DATE_EPOCH` plus outside-repo
+  wheel imports from `site-packages` for local release evidence.
 
 ## 0.8.0 - 2026-07-14
 

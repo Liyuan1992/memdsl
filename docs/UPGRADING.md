@@ -21,16 +21,30 @@ from that branch, or appending reviewed lifecycle events before returning to a
 v3 state. Review/audit logs are preserved. Old 0.8 runtimes fail closed on the
 v3 manifest rather than silently ignoring Edge semantics.
 
-Release target: memdsl 0.8.0, 2026-07-14. The previous published baseline is
-0.6.0; 0.7.0 was not separately published.
+`CompiledWorkspace` and `compile_workspace` are now package-root public
+contracts for deterministic, rebuildable compilation. This is additive: code
+that passes `Workspace` directly to Catalog, Query, Trace, or `resolve_view()`
+continues to work. Cache/index container layout remains an implementation
+detail and must not be persisted as authority.
+
+Automatic dialect learning, automatic Edge candidate generation, inferred
+authoritative edges, stable Edge promotion, and Phase 7 remain unshipped.
+Host-specific extraction/sanitization, private schemas/policies/samples, and
+runtime adapters are excluded rather than migration targets. See
+[the Phase 6 release matrix](RELEASE_SCOPE_PHASE6.md).
+
+Local release target: memdsl `0.9.0.dev0`, 2026-07-15. The previous published
+baseline is 0.6.0; 0.7.0 was not separately published, and 0.8 remains the
+stable/public compatibility contract carried by this dev candidate.
 
 The v1 compatibility/authority surfaces, Catalog v1, Trace v1, indexed
 query/search trace, report diagnostics, workspace v2, exact `use`,
 `dialect_mapping`, `ViewContext`/`ResolvedView`, and explicit v2 read schemas
 are public 0.8 contracts. Real-workspace quarantine/strict rollout quality,
 dialect-candidate learning, and host-attested principal integration remain
-experimental and opt-in. `CompiledWorkspace`, compiler/cache/index layouts,
-contract strings, complexity constants, and synthetic timings remain internal.
+experimental and opt-in. `CompiledWorkspace` is public and rebuildable;
+compiler/cache/index layouts, contract strings, complexity constants, and
+synthetic timings remain internal.
 
 ## Python compatibility
 
@@ -285,7 +299,9 @@ The public Python additions are `ViewContext`, `ResolvedView`,
 `resolve_view()`, `RESOLVED_VIEW_SCHEMA`, `ENFORCEMENT_TABLE`,
 `build_resolved_evidence_pack()` with `RESOLVED_EVIDENCE_PACK_SCHEMA`,
 `build_resolved_query/list/explain/check()`, `ResolvedCursorError`, and the
-v2 Catalog/Trace schema constants. `CompiledWorkspace` remains internal.
+v2 Catalog/Trace schema constants. The current candidate additionally exports
+the rebuildable `CompiledWorkspace` handle and `compile_workspace()` without
+changing these v2 serialized contracts.
 
 Enforced reads classify Source as authoritative, provisional, quarantined, or
 excluded and use new schemas:

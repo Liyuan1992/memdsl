@@ -1,179 +1,117 @@
-# P6 Final Local Integration and Publication Audit
+# Phase 6 Mainline Local Release and Publication-Boundary Audit
 
 **Audit date:** 2026-07-15<br>
-**Integration branch:** `codex/paper-v06-final-integration-audit`<br>
-**Software candidate base:** `091b4736e02969ccdd198cfcb30ba9038feb78db`<br>
-**Paper source:** `5c55948b13029d82974cc12ee3249099b0444f75`<br>
-**P5 parent / P4:** `ce18a95eede73949c27648fb3262bb9b480a3561`
+**Release line:** local `0.9.0.dev0` candidate<br>
+**Paper/candidate baseline:** `4ee810833ef0cbd8562e72e3ad202a07c5ce77e8`<br>
+**Experimental Edge implementation:** `6bc3ffd986b1ffe29cefa928642fd0cf47e5c2c9`<br>
+**Human-review reconciliation:** `4ec9d43fda56a277609dd822c61acdb9a7265655`
 
-## Scope and integration result
+## Scope and ancestry
 
-P6 integrated the final P5 paper artifact into the `0.8.0` candidate without
-merging the paper branch's older runtime ancestry. The candidate runtime,
-Phase -1 through Phase 5 implementation, version metadata, CI hardening, and
-release scripts remain authoritative for the software tree. The P5 main
-manuscript, claim ledger, reproducibility metadata, publication-readiness
-audit, and software/paper citation split remain authoritative for the focused
-paper artifact.
+This audit supersedes the old local artifact receipt as the current release
+boundary without rewriting its history. The three commits above form a direct
+linear parent chain. The earlier paper integration correctly kept practical
+Phase 6 out of the 0.8 candidate at that time; the later Phase 6 implementation
+was separately authorized and remains an opt-in experiment.
 
-The practical source/compiled-view design and the focused authority paper are
-kept side by side and cross-referenced through `README.md`,
-`docs/DOCUMENTATION_INDEX.md`, and both companion documents. They are not
-collapsed into one specification.
-
-No practical Phase 6/7 implementation was added. No authority ledger,
-`L_auth`, digest-bound grant, proof object, live reduction closure, or
-proof-checked `Verify` sink was added. memdsl remains a reference
+The practical source/compiled-view specification and the focused authority
+paper remain side by side. The experimental Edge implementation does not add
+the paper's authority ledger, digest-bound grants, proof objects, live
+reduction closure, or proof-checked `Verify` sinks. memdsl remains a reference
 implementation target rather than a conforming paper-authority runtime.
 
-## Version, citation, and license boundary
+## Frozen release matrix
 
-| Artifact | Status |
+| Classification | Current local candidate |
 | --- | --- |
-| memdsl `0.6.0` | shipped software cited by the top-level `CITATION.cff` record |
-| memdsl `0.8.0` | unreleased local candidate; no remote release evidence |
-| paper `v0.6` | unpublished focused position-paper draft in `preferred-citation` |
-| software | MIT |
-| specification | separate CC-BY-4.0 statement in `docs/SPEC.md` |
-| paper artifacts and P6 receipt | CC BY 4.0 under `docs/PAPER_LICENSE.md` |
+| Stable/public | Source authority; proposal/review/approval; append-only audit and pending isolation; public rebuildable `CompiledWorkspace` / `compile_workspace`; v1/v2 Catalog, Query, List, Explain, Check, Trace, Map compatibility, workspace schemas, and existing public API contracts |
+| Experimental | workspace v3; `features.explicit_edges="experimental-v1"`; `relation_edge` / `explicit_edge`; Edge events, evidence, lifecycle, list/explain/Trace, and dedicated CLI confirmation; all four built-in Edge descriptors |
+| Hard floor | `relation_edge`, `explicit_edge`, `relation_edge_event`, `explicit_edge_event`, and `edge_lifecycle` always require a person; schemas/policies cannot auto-approve them; `related` is discovery-only; explicit `supersedes` is graph-only |
+| Planned / not shipped | automatic dialect learning, automatic Edge candidates, inferred authoritative edges, stable Edge promotion, Phase 7 cold-history/incremental compilation, and the paper authority runtime |
+| Host-specific / excluded | extraction and sanitization pipelines, private schemas/policies/samples/workbooks, identifiers and path mappings, UI, and runtime adapters; host shadow activation is not a memdsl release gate |
 
-P6 did not create or infer a DOI, ORCID, email address, institution, venue, or
-archival publication status.
+The complete normative matrix is
+[RELEASE_SCOPE_PHASE6.md](RELEASE_SCOPE_PHASE6.md).
 
-## Frozen-source verification
+## Anonymous exploratory evidence and limits
 
-Before integration, all supplied P5 committed-blob SHA-256 values matched the
-specified commit. P6 preserves the exact committed content and hashes of:
+The first completed human follow-up batch produced `accept=7`, `uncertain=3`,
+and `reject=0`. The uncertain items were invalid or unreviewable source
+contamination, not Edge negatives. The evidence supports an **ADJUST** outcome:
+independently reviewable Edges can be useful, but automatic candidate coverage,
+relation selection, and evidence stability are not ready for automatic
+activation.
 
-- `CITATION.cff`;
-- `docs/PAPER_publication_readiness_audit.md`;
-- `docs/PAPER_related_work_claim_ledger.md`;
-- `docs/PAPER_reproducibility_and_release_metadata.md`;
-- `docs/PAPER_review_gated_authority_source_compiled_contract.md`.
-
-`LICENSE` and `docs/PAPER_LICENSE.md` were intentionally extended only to
-cover this final integration receipt. The three frozen Phase -1 baseline files
-retain their supplied SHA-256 values.
-
-The paper audit reports:
-
-- 5,052 whitespace-delimited manuscript words;
-- 14/14 numbered references cited in the body;
-- 24/24 unique claim-ledger rows;
-- valid internal Markdown targets;
-- CFF schema 1.2.0 validity;
-- preserved software/paper license separation;
-- no private workspace, credential, machine path, proposal store, audit log,
-  database, cache, or personal dataset in the paper sources.
+Threats to validity include the single-principal setting, ten-item batch,
+pre-review host selection/extraction, exclusion of contamination from the Edge
+denominator, no direct human validation of `supersedes`, no representative
+cross-workspace sample, and no production queue-economics evidence. No claim of
+automatic extraction, automatic Edge generation, complete private-memory
+understanding, comparative effectiveness, or mechanized security follows.
 
 ## Local verification record
 
 | Gate | Result |
 | --- | --- |
-| Full regression | `356 passed` |
-| Focused Phase -1/2/3/4/5 files | `116 passed` |
-| Real stdio, scope denial, gated write, pending isolation, approval, and scale selection | `9 passed` |
-| Compile | `compileall` passed for `src`, `tests`, and `scripts` |
-| Python compatibility | Python 3.9 AST grammar passed for 21 core source files |
-| Dependency integrity | `pip check` reported no broken requirements |
-| Version contract | project and runtime both `0.8.0` |
-| CLI lint demo | 2 errors, 3 warnings, exit 1 |
-| CLI query/explain | passed; expected global MUST constraints were present |
-| CLI Catalog/Trace | `memdsl.catalog.v1` / `memdsl.trace.v1`, status `ok` |
-| MCP inspect | 11 tools, status and lint readable |
-| MCP real stdio | v1/v2, resources, cursor behavior, scope denial, and quarantine passed |
-| Gated write | invalid missing-evidence proposal rejected; pending stayed unserved; human approval made the declaration queryable; audit remained append-only |
-| Synthetic scale | 100/1,000/10,000 bounded Catalog/query/Trace/list gates passed |
-| CFF | `cffconvert 2.0.0 --validate` passed in an isolated environment |
-| Twine | wheel and sdist passed |
-| Member/privacy scanner | passed for both archives |
-| Fresh wheel | installed outside the repository from `site-packages`; CLI, MCP, v1/v2, scope denial, real stdio, and installed paper files passed |
-| Diff checks | working and staged `git diff --check` passed |
+| Full regression | `403 passed`; `0 xfail` |
+| Focused Phase 6 | `47 passed` |
+| Focused release/static/public API | `6 passed` (`53 passed` when run together with Phase 6) |
+| Compile | `compileall -q src tests scripts` passed |
+| Python compatibility | Python 3.9 AST gate passed for 22 source files |
+| Dependency integrity | `pip check`: no broken requirements |
+| Version contract | `0.9.0.dev0` across project, runtime, tests, and CI |
+| Fixed build epoch | `SOURCE_DATE_EPOCH=1784077269` |
+| CLI / MCP inspect / real stdio | lint-demo produced the expected 2 errors / 3 warnings / exit 1; Query, Explain, Catalog, Trace, MCP inspect, and Phase 3-6 stdio passed |
+| Scoped denial and gated write | 23 targeted stdio, denial, pending-isolation, approval/confirmation, and review-floor cases passed |
+| Synthetic scale/security gates | 20 targeted bounded-scale, fail-closed, hidden-data, invalid-event, and no-auto-approval cases passed |
+| CFF / paper / links / privacy | isolated `cffconvert==2.0.0` validation passed; 14 references, 24 claim rows, 5,250 manuscript words, links, license, privacy, and frozen hashes passed |
+| Twine and archive membership/privacy | Twine passed; wheel 44 members, sdist 107 members; required-member, host-marker, and privacy scans passed |
+| Reproducible double build | two fixed-epoch builds produced byte-identical wheel and sdist SHA-256 values |
+| Fresh wheel | imported from temporary `Lib/site-packages`; 17 installed docs; dependency, CLI, MCP inspect, v1/v2 stdio, scope denial, and workspace-v3 Edge CLI/MCP/stdio passed |
+| Diff and clean-state checks | `git diff --check` passed; protected launch article absent from this worktree and staging; the release commit left the worktree clean |
 
-The CFF validator is intentionally isolated from the main MCP environment:
-`cffconvert 2.0.0` constrains an older `jsonschema`, while the current MCP SDK
-uses the modern dependency line. CI and publish definitions now validate CFF
-in a separate environment rather than silently downgrading MCP.
+The fresh-wheel gate must prove that `memdsl.__file__` is inside the temporary
+environment's `site-packages`, not the repository or editable source tree. It
+must also verify the installed documentation set and the workspace-v3 Edge
+CLI/MCP/stdio contract.
 
 ## Final local archives
 
-The local archives were built with
-`SOURCE_DATE_EPOCH=1784034855`, the timestamp of the candidate base commit, so
-the P6 receipt can be excluded while the package identity remains
-reproducible. These hashes identify local candidate artifacts only:
+The final wheel and sdist were built twice with the frozen epoch. Both builds
+matched byte for byte.
 
 | Archive | Bytes | Members | SHA-256 |
 | --- | ---: | ---: | --- |
-| `memdsl-0.8.0-py3-none-any.whl` | 264,973 | 38 | `d406c89060027c22cf917d95d7ffdd227c39931158b829b841e443be94cbbde1` |
-| `memdsl-0.8.0.tar.gz` | 388,242 | 104 | `5909bd78ec6c09b4254696e21f28f849f7d428c6c6b4c835ee4cc7a3a12757f3` |
+| `memdsl-0.9.0.dev0-py3-none-any.whl` | 332,519 | 44 | `662233cc14d4688de728f61d162e7403f1cdd898780f0114d2f976eb0e51aaac` |
+| `memdsl-0.9.0.dev0.tar.gz` | 429,685 | 107 | `ba94d0281f0a870d5f228b6d4143d974caf7918f0d4c0299f76dd117e8155a14` |
 
-Both archives include the documentation index, practical design, main paper,
-claim ledger, reproducibility metadata, P5 readiness audit, paper license,
-`CITATION.cff`, software license, frozen baseline files, and synthetic
-benchmark harness. The wheel installs 12 paper/reproducibility files under
-`share/doc/memdsl`.
+Both archives must include the documentation index, practical design, explicit
+Edge design, release-scope freeze, SPEC, PUBLIC_API, UPGRADING, focused paper,
+claim ledger, reproducibility metadata, readiness audit, paper license,
+`CITATION.cff`, software license, frozen baselines, and synthetic benchmark.
 
-Both archives exclude:
+Both archives must exclude this receipt, repository-local agent instructions,
+the protected checkout-only launch article, real memory workspaces outside
+explicit synthetic fixtures, review stores, approved memory, workbooks,
+environment files, credentials, keys, caches, databases, backups, logs, and
+machine-specific absolute paths.
 
-- `docs/launch_article_zh.md`;
-- this P6 receipt, because embedding an archive's own SHA-256 inside the same
-  archive would make its identity self-referential;
-- real memory workspaces or memory source outside explicit synthetic
-  `examples/` and `tests/fixtures/` roots;
-- `.memdsl`, `approved.mem`, proposals, audit logs, environment files,
-  credentials, private keys, caches, databases, backups, and logs;
-- machine-specific absolute paths.
+## Protected-file and privacy result
 
-The earlier candidate hashes
-`ddd59f921b74a8df06b254ca9fef6e46f13d0c75c5b2ab94853cb891facb10c7`
-and
-`639a08d92fd233bcb0b9f702f7426329a58dccf82d43e79f99401b11a3ae318d`
-remain historical pre-paper candidate evidence and are not the P6 archive
-identities.
+The checkout-only launch article remains outside this worktree's modifications,
+staging set, commit, and archives. No private source text, row-level evidence,
+identifier mapping, workbook content, private schema/policy, or host-specific
+runtime path is included in this audit or the release artifacts.
 
-## Protected original checkout
+## Decision
 
-The original checkout remains on `codex/phase-minus-1-baseline` at
-`244e8d25bb71731f31a60a9dbabd74f6f48ed2fb`. Its only dirty path remains the
-untracked `docs/launch_article_zh.md`, with size 19,640 bytes and SHA-256
-`38b2c7ebf94be266bde1ad9aad577c99000bcd0740b29607d213268987410568`.
-P6 did not modify, stage, commit, copy, or package that file.
-
-## Final decision
-
-- **GO:** local integration of the practical `0.8.0` candidate and focused
-  paper `v0.6` artifact.
-- **GO:** local release-candidate verification and archive inspection.
-- **NO-GO:** push, tag, GitHub Release, PyPI `0.8.0`, Zenodo record, DOI, or
-  public/archival paper submission in this window.
-- **NO-GO:** describing the manuscript as an empirical systems result, an
-  evaluated security system, or a mechanized soundness result.
+- **GO:** the local `0.9.0.dev0` Phase 6 mainline release candidate passes the
+  frozen implementation, compatibility, paper-boundary, reproducibility,
+  archive, privacy, and fresh-install gates in this window.
+- **NO-GO:** push, tag, GitHub Release, PyPI, Zenodo, DOI, deployment, or public
+  paper submission in this window.
+- **NO-GO:** describing experimental Edges as stable, automatic, or proof that
+  private-memory extraction is solved.
 - **NO-GO:** describing memdsl as implementing the paper authority runtime.
 
-Public or archival paper submission remains blocked until the author confirms
-the scholarly display name, funding statement, and competing-interest
-statement. No empirical comparison or mechanized soundness proof exists.
-
-## Exact remaining remote actions
-
-All actions below require renewed explicit user authorization:
-
-1. Confirm the scholarly display name, funding statement, and
-   competing-interest statement; optionally supply, but never infer, ORCID,
-   email, institution, venue, or other publication metadata.
-2. Authorize a push of the exact clean P6 integration commit and wait for the
-   full remote core, MCP, CFF, paper, phase/security, build, member/privacy, and
-   fresh-install CI gates on that commit.
-3. If releasing software, authorize creation of `v0.8.0` at the verified
-   commit. Rebuild from the clean tag, record new tag-build hashes, run Twine
-   and outside-repository fresh install again, then separately authorize the
-   GitHub Release and PyPI upload. Do not reuse the local P6 hashes as remote
-   release evidence.
-4. If publishing the paper, choose the venue, complete the broader novelty and
-   submission review, generate and inspect the submission PDF, then separately
-   authorize any Zenodo record or DOI creation. Update citation metadata only
-   after identifiers and archival status actually exist.
-5. After any PyPI publication, install `memdsl==0.8.0` into a new environment
-   from the public index and repeat CLI, MCP, paper-member, and version checks.
-
-No remote publication action occurred during P6.
+No remote publication or deployment action occurred during this audit.

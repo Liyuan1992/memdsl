@@ -4,6 +4,9 @@ on:
   push:
     tags: ["v*"]
 
+env:
+  SOURCE_DATE_EPOCH: "1784077269"
+
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
@@ -38,11 +41,12 @@ jobs:
         run: |
           python -m compileall -q src tests scripts
           python scripts/release_checks.py python39-ast
+          python scripts/release_checks.py source-date-epoch
           python scripts/release_checks.py paper
           python -m pip check
           git diff --check
           python -m pytest -q
-          python -m pytest -q tests/test_phase_minus_one_characterization.py tests/test_phase_two_catalog_budget.py tests/test_phase_three_indexed_query_trace.py tests/test_phase_four_use_dialect.py tests/test_phase_five_quarantine_enforcement.py
+          python -m pytest -q tests/test_phase_minus_one_characterization.py tests/test_phase_two_catalog_budget.py tests/test_phase_three_indexed_query_trace.py tests/test_phase_four_use_dialect.py tests/test_phase_five_quarantine_enforcement.py tests/test_phase_six_explicit_edges.py
 
       - name: Build, Twine, member listing, and privacy scan
         run: |

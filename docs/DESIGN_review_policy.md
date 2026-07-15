@@ -59,7 +59,7 @@ memdsl 0.5.x 对所有 proposal 使用同一条路径：验证后进入 pending 
 - 自动撤销被 flag 的记忆。
 - 物理删除或原地改写已批准 declaration。
 - 由 memdsl 核心创建 Git commit、Git tag 或执行 git revert。
-- 依赖 DigitalSelf、rawmem、某个用户身份、某个私有 schema 或固定文件布局。
+- 依赖特定宿主应用、上游记忆存储、某个用户身份、某个私有 schema 或固定文件布局。
 - 接受 MCP tool 调用者传入的 trusted client、evidence verified 或 verifier attestation。
 
 ## 3. 现有代码边界

@@ -28,6 +28,7 @@ PAPER_FILES = {
     "baselines/phase_minus_one_0.6.0.json",
     "benchmarks/phase_minus_one_baseline.py",
     "PUBLIC_API.md",
+    "RELEASE_SCOPE_PHASE6.md",
     "SPEC.md",
     "UPGRADING.md",
 }
@@ -245,6 +246,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "-c",
                 (
                     "import json, memdsl; "
+                    "assert memdsl.CompiledWorkspace is not None; "
+                    "assert callable(memdsl.compile_workspace); "
                     "print(json.dumps({'version': memdsl.__version__, "
                     "'import_path': memdsl.__file__}))"
                 ),

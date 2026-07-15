@@ -1,10 +1,9 @@
-"""Internal deterministic workspace compilation through experimental Phase 6.
+"""Deterministic workspace compilation through experimental Phase 6.
 
-This module is deliberately not re-exported from :mod:`memdsl`.  It provides
-the indexed, rebuildable representation used by the existing v0.6 read
-surfaces without creating a public ``CompiledWorkspace`` API commitment yet.
-Source declarations remain authoritative; every object here can be discarded
-and rebuilt from a :class:`memdsl.model.Workspace`.
+``CompiledWorkspace`` and ``compile_workspace`` are public, rebuildable read
+contracts. Their indexes remain derived products rather than authority:
+Source stays normative, and compiler state can always be discarded and
+rebuilt from :class:`memdsl.model.Workspace`.
 """
 
 from __future__ import annotations

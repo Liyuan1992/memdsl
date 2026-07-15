@@ -41,6 +41,7 @@ packages = ["src/memdsl"]
 "docs/DESIGN_memory_source_compiled_view.md" = "share/doc/memdsl/DESIGN_memory_source_compiled_view.md"
 "docs/DESIGN_explicit_edges_phase6.md" = "share/doc/memdsl/DESIGN_explicit_edges_phase6.md"
 "docs/PUBLIC_API.md" = "share/doc/memdsl/PUBLIC_API.md"
+"docs/RELEASE_SCOPE_PHASE6.md" = "share/doc/memdsl/RELEASE_SCOPE_PHASE6.md"
 "docs/SPEC.md" = "share/doc/memdsl/SPEC.md"
 "docs/UPGRADING.md" = "share/doc/memdsl/UPGRADING.md"
 "docs/PAPER_LICENSE.md" = "share/doc/memdsl/PAPER_LICENSE.md"
@@ -53,4 +54,4 @@ packages = ["src/memdsl"]
 "benchmarks/phase_minus_one_baseline.py" = "share/doc/memdsl/benchmarks/phase_minus_one_baseline.py"
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/docs/PAPER_final_integration_audit.md"]
+exclude = ["/AGENTS.md", "/docs/PAPER_final_integration_audit.md"]

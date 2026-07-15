@@ -12,6 +12,12 @@ Laundering](PAPER_review_gated_authority_source_compiled_contract.md)<br>
 mapping, implementation-status accuracy, focus, metadata, licensing, privacy,
 and local publication readiness. This is not external peer review.
 
+**Phase 6 mainline addendum:** the original P5 decision remains a historical
+paper audit. The current implementation-status rows below have been reconciled
+to the later experimental Edge commits `6bc3ffd986b1ffe29cefa928642fd0cf47e5c2c9`
+and `4ec9d43fda56a277609dd822c61acdb9a7265655`. This addendum does not change the
+paper's nonconforming status or authorize publication.
+
 ## Executive decision
 
 - **Focused position paper:** locally ready for P6 integration after the
@@ -22,9 +28,10 @@ and local publication readiness. This is not external peer review.
 - **Public or archival publication:** **no-go** until the author confirms the
   scholarly display name, funding statement, and competing-interest statement.
   DOI, ORCID, email, and institution remain absent and must not be invented.
-- **Software release:** unchanged. `0.8.0` remains an unreleased local
-  candidate. No P5 evidence is a remote CI run, tag, GitHub Release, Zenodo
-  record, DOI, PyPI release, production rollout, or empirical result.
+- **Software release:** `0.9.0.dev0` is an unreleased local candidate. Stable
+  0.8 contracts remain public; workspace-v3 explicit Edges remain experimental.
+  No local evidence is a remote CI run, tag, GitHub Release, Zenodo record,
+  DOI, PyPI release, production rollout, or comparative empirical result.
 
 ## Evidence boundary
 
@@ -34,8 +41,10 @@ The audit distinguishes these immutable states:
 | --- | --- | --- |
 | Shipped software | tag `v0.6.0`, commit `72274d9d4f065b76bceaf30f529dcbd47b3f3e18` | Public software baseline only |
 | Implemented source line | Phase -1 through Phase 5 ending at `8e7c84815897ad13f89522e9e3b1edd0fcdb37b0` | `CompiledWorkspace`, Catalog, Trace, exact `use`, workspace Dialect, and opt-in quarantine/`ResolvedView` |
-| Deferred practical phases | `ff9ff8a7dfe983a9db3caaf221d7315cfda8eba6` | Phase 6 first-class edges and Phase 7 cold-history/incremental compilation were audited and deferred, not implemented |
-| Unreleased local candidate | `091b4736e02969ccdd198cfcb30ba9038feb78db` | Local `0.8.0` integration and release-gate evidence only |
+| Historical Phase 6/7 gate | `ff9ff8a7dfe983a9db3caaf221d7315cfda8eba6` | Correctly deferred both phases at the 0.8 evidence gate; this remains historical evidence, not the current Phase 6 state |
+| Experimental Phase 6 | `6bc3ffd986b1ffe29cefa928642fd0cf47e5c2c9`, reconciled by `4ec9d43fda56a277609dd822c61acdb9a7265655` | workspace-v3 first-class Edge source/lifecycle/review contract with a permanent human-review floor; not stable and not paper-authority conformance |
+| Unreleased local candidate | `0.9.0.dev0` scope freeze after `4ec9d43fda56a277609dd822c61acdb9a7265655` | Stable 0.8 contracts plus experimental Phase 6 and local release-gate evidence only |
+| Deferred practical work | current release-scope freeze | Phase 7, automatic dialect learning, automatic Edge candidates, and stable Edge promotion remain planned/not shipped |
 | Paper authority contract | P4 commit `ce18a95eede73949c27648fb3262bb9b480a3561`, refined by this P5 audit | Planned `L_auth`, digest-bound grants, `(p,h)` checkouts, proof objects, live reduction closure, and proof-checked `Verify` sinks |
 
 At the exact candidate commit, a source search outside planning documents finds
@@ -77,8 +86,8 @@ The paper separates normative source, rebuildable compilation products,
 authenticated governance state, checked serving, and sink verification. It
 also names the trusted computing base, budget/completeness boundary, migration
 strategy, and failure behavior. The artifact manifest accurately distinguishes
-shipped `0.6.0`, implemented Phase -1 through 5, deferred Phase 6/7, the local
-`0.8.0` candidate, and the unimplemented paper contract.
+shipped `0.6.0`, stable/public Phase -1 through 5, experimental Phase 6, planned
+Phase 7, the local `0.9.0.dev0` candidate, and the unimplemented paper contract.
 
 The systems evidence is local and synthetic. There is no implemented authority
 ledger, proof store, frontier-advance protocol, proof verifier, or production
@@ -154,11 +163,11 @@ claims would require those additions; P5 does not create them.
 | Claim scope | Ready for position-paper framing | Contributions are bounded; no field-wide priority claim or comparative result is asserted. |
 | Formal consistency | Ready after minor P5 corrections | Single root, frontiers, judgment layers, digest split, proof conclusions, existential reduction closure, and currentness/redaction agree. No soundness theorem is claimed. |
 | Related work | Ready within audited corpus | 14/14 references are cited; 24/24 ledger rows map to the manuscript. Broader search remains future work. |
-| Implementation status | Accurate but nonconforming | Shipped `0.6.0`, implemented Phase -1 through 5, deferred Phase 6/7, local `0.8.0` candidate, and planned paper runtime remain distinct. |
+| Implementation status | Accurate but nonconforming | Shipped `0.6.0`, stable/public Phase -1 through 5, experimental Phase 6, planned Phase 7, local `0.9.0.dev0` candidate, and planned paper runtime remain distinct. |
 | Reproducibility | Locally ready; remotely incomplete | Frozen synthetic baseline and local candidate artifacts are hash-bound. No paper PDF was generated. Remote CI/tag/release/PyPI evidence does not exist. |
 | Metadata | Blocked for submission | Scholarly display name is unconfirmed. DOI, ORCID, email, institution, venue, and archival status are absent and must not be fabricated. |
 | License | Ready locally | Paper artifacts, including this audit, are CC BY 4.0; software remains MIT; `docs/SPEC.md` retains its separate statement. |
-| Privacy | Ready for the audited local sources | Paper artifacts contain synthetic/public material and no private memory workspace, proposal store, audit log, credential, or personal dataset. Artifact and machine-path scans remain required in P6. |
+| Privacy | Ready for the audited local sources | Paper artifacts contain public/synthetic material plus only the anonymous Phase 6 aggregate; no private memory workspace, row-level evidence, identifier mapping, proposal store, audit log, credential, or personal dataset is included. Artifact and machine-path scans remain mandatory. |
 | Disclosures | Blocked for submission | AI assistance and human-subjects/data scope are stated. Funding and competing-interest statements require author confirmation. |
 | Remote publication | Blocked / not authorized | No push, tag, GitHub Release, Zenodo/DOI action, or PyPI publication is permitted in P5. Future remote actions require explicit user authorization and fresh verification. |
 
@@ -191,8 +200,8 @@ for the sdist. These are local candidate hashes, not public-release hashes.
 4. DOI, ORCID, email, and institution remain absent; none may be created or
    inferred in P5.
 5. The paper authority runtime remains unimplemented.
-6. The `0.8.0` candidate remains local; remote CI, tag, GitHub Release, Zenodo,
-   DOI, and PyPI publication have not occurred.
+6. The `0.9.0.dev0` candidate remains local; remote CI, tag, GitHub Release,
+   Zenodo, DOI, and PyPI publication have not occurred.
 7. Any empirical comparison, mechanized proof, or security-evaluation claim
    requires a later authorized research and implementation effort.
 

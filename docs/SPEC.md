@@ -1,8 +1,8 @@
 # Memory DSL Specification
 
-Version: 0.8
-Status: reference specification for the `memdsl` v0.8 implementation
-Release date: 2026-07-14
+Version: stable 0.8 base with `0.9.0.dev0` experimental extension
+Status: reference specification for the local memdsl release candidate
+Release date: unreleased; evidence freeze 2026-07-15
 License: [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)
 
 The frozen 0.8 contract below remains normative for v1/v2 workspaces.
@@ -48,10 +48,12 @@ Python 3.10+ surface. Python 3.9 deployments are core-only.
 
 ### 1.2 Release classification
 
-The following are stable public 0.8 contracts: v1 compatibility and authority
-lanes, Catalog v1, Trace v1, indexed query/search-trace behavior, report
-diagnostic codes, workspace v2, exact `use`, the generic `dialect_mapping`
-capability, `ViewContext`/`ResolvedView`, and the explicit v2 read schemas.
+The following are stable public 0.8 contracts: Source authority and
+review-gated writes, `CompiledWorkspace` / `compile_workspace`, v1
+compatibility and authority lanes, Catalog v1, Trace v1, indexed
+query/search-trace behavior, report diagnostic codes, workspace v2, exact
+`use`, the generic `dialect_mapping` capability, `ViewContext`/`ResolvedView`,
+and the explicit v2 read schemas.
 Map v1 remains supported for the entire 0.8 line and is not eligible for
 removal before 1.0.
 
@@ -59,9 +61,17 @@ The operational quality of real-workspace quarantine/strict rollout,
 dialect-candidate learning, and host-attested principal integration is
 experimental and explicit opt-in. That label never weakens authorization,
 hard-rule completeness, authority, or repair-lane safety requirements.
-`CompiledWorkspace`, cache/index layouts, compiler contract strings,
-complexity constants, and synthetic timing numbers are implementation facts,
-not public API or performance SLAs.
+`CompiledWorkspace` is a public rebuildable handle. Its cache/index layout,
+compiler contract strings, complexity constants, and synthetic timing numbers
+remain implementation facts rather than serialized API or performance SLAs.
+
+The release classification is frozen in
+[RELEASE_SCOPE_PHASE6.md](RELEASE_SCOPE_PHASE6.md): workspace-v3 explicit
+Edges are experimental; automatic dialect learning, automatic Edge candidate
+generation, inferred authoritative edges, stable Edge promotion, and Phase 7
+cold-history/incremental compilation are planned; host-specific extraction,
+sanitization, private schemas/policies/samples, and runtime adapters are
+excluded from memdsl.
 
 ## 2. Non-goals
 
@@ -78,9 +88,9 @@ Version 0.8 deliberately does not attempt:
   runtimes remain responsible for binding identities to it.
 - Pretending arbitrary natural-language constraints can be checked
   deterministically. Unexecutable constraints produce `needs_review`.
-- First-class reviewed edge syntax/lifecycle or inferred authoritative graph
-  edges. These remain deferred until published Trace usage supplies concrete
-  review and provenance evidence.
+- Automatic Edge candidate generation, inferred authoritative graph edges, or
+  promotion of the workspace-v3 explicit Edge experiment to stable. Phase 6
+  ships only an opt-in, human-review-only source/lifecycle contract.
 - Cold-history storage, object stores, or incremental compiler semantics.
   Synthetic cold-cost growth alone is not a production bottleneck contract.
 
@@ -350,7 +360,6 @@ When multiple valid active declarations supersede one target, report mode does
 not choose a winner: all successors remain visible and lint reports
 `supersedes_fork`; the old target remains superseded. `conflicts_with` keeps
 both declarations visible under CONFLICT.
-`conflicts_with` keeps both declarations visible under CONFLICT.
 
 ## 5. Extensible type system
 
@@ -983,6 +992,20 @@ The anonymous first human follow-up batch supplied sample support for
 so AI recommendation alone MUST NOT promote that descriptor to stable.
 `related` remains discovery-only and MUST NOT enter the authoritative built-in
 Edge registry.
+
+The evidence basis is an anonymous single-principal exploratory follow-up, not
+a representative study. The first completed human batch was `accept=7`,
+`uncertain=3`, `reject=0`. The uncertain items were invalid or unreviewable
+source contamination rather than Edge negatives. This supports an **ADJUST**
+decision: independently reviewable Edges can be useful, but automatic
+candidate coverage, relation selection, and evidence stability are not shown
+to be ready. The batch does not validate automatic extraction, automatic Edge
+generation, production review economics, complete private-memory
+understanding, or the paper authority runtime.
+
+Host-specific extraction and sanitization acceptance is outside this
+specification. A host may refuse to activate its own shadow pipeline without
+changing or blocking the generic memdsl release decision.
 
 Only active, resolved Edge records with active endpoints enter the
 authoritative graph. Before any operational count, filter, diagnostic,

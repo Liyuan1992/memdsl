@@ -3,6 +3,11 @@
 Status: experimental contract for `0.9.0.dev0`; not part of the frozen 0.8
 candidate semantics.
 
+The stable/public, experimental, planned, and host-excluded release matrix is
+frozen in [RELEASE_SCOPE_PHASE6.md](RELEASE_SCOPE_PHASE6.md). This document is
+the experimental Edge design, not a claim that the feature is stable or that a
+host extraction pipeline is ready for automatic activation.
+
 ## Pilot basis
 
 The evidence basis is an anonymous, single-principal exploratory pilot, not a
@@ -37,6 +42,20 @@ formal empirical validation claim.
 Candidate generation remains a host/experiment responsibility. Core accepts
 review proposals; it does not ship a private generator, infer user semantics,
 approve candidates, or activate graph/authority from model output.
+
+### Threats to validity and host boundary
+
+The follow-up is one anonymous, single-principal batch with ten adjudicated
+items. Selection and candidate extraction occurred before human review, the
+sample is too small for cross-workspace generalization, and excluding invalid
+source contamination from the Edge denominator does not establish end-to-end
+extraction quality. No automatic-coverage, production queue-economics,
+complete-understanding, or stable-relation claim follows.
+
+Host-specific extraction, sanitization, private schemas, policies, samples,
+workbooks, identifiers, and runtime adapters remain outside memdsl. A host may
+refuse to activate its own shadow pipeline; that is not evidence that this
+generic Source/review/Edge contract failed and is not a memdsl release gate.
 
 ## Source opt-in and old-runtime fail-closed behavior
 

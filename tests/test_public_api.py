@@ -6,6 +6,8 @@ def test_v09_experimental_public_contract_preserves_v08_exports():
     assert memdsl.EVIDENCE_PACK_SCHEMA == "memdsl.evidence_pack.v1"
     assert memdsl.Workspace is not None
     assert memdsl.Declaration is not None
+    assert memdsl.CompiledWorkspace is not None
+    assert callable(memdsl.compile_workspace)
     assert memdsl.EvidencePack is not None
     assert memdsl.ReviewStore is not None
     assert memdsl.Proposal is not None
@@ -15,7 +17,7 @@ def test_v09_experimental_public_contract_preserves_v08_exports():
     assert callable(memdsl.build_memory_map)
     assert callable(memdsl.render_memory_map_text)
     assert callable(memdsl.workspace_vocabulary)
-    # Phase 2 bounded navigation is public without exporting CompiledWorkspace.
+    # CompiledWorkspace is a public rebuildable handle; Source stays authority.
     assert memdsl.CATALOG_SCHEMA == "memdsl.catalog.v1"
     assert callable(memdsl.build_memory_catalog)
     assert memdsl.CatalogCursorError is not None

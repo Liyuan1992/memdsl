@@ -6,6 +6,7 @@ on:
 
 env:
   MEMDSL_RELEASE_VERSION: "0.9.0.dev0"
+  SOURCE_DATE_EPOCH: "1784077269"
 
 jobs:
   core:
@@ -105,6 +106,7 @@ jobs:
         run: |
           python scripts/release_checks.py version --expected ${{ env.MEMDSL_RELEASE_VERSION }}
           python scripts/release_checks.py python39-ast
+          python scripts/release_checks.py source-date-epoch
           python scripts/release_checks.py paper
           python -m compileall -q src tests scripts
           python -m pip check

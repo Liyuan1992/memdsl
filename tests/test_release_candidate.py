@@ -27,6 +27,7 @@ def test_ci_covers_core_mcp_security_and_artifact_release_gates() -> None:
         encoding="utf-8"
     )
     assert 'MEMDSL_RELEASE_VERSION: "0.9.0.dev0"' in workflow
+    assert 'SOURCE_DATE_EPOCH: "1784077269"' in workflow
     for version in ("3.9", "3.10", "3.11", "3.12"):
         assert f'"{version}"' in workflow
     assert 'python-version: ["3.10", "3.12"]' in workflow
@@ -36,6 +37,7 @@ def test_ci_covers_core_mcp_security_and_artifact_release_gates() -> None:
     assert "test_phase_five_quarantine_enforcement.py" in workflow
     assert "test_phase_six_explicit_edges.py" in workflow
     assert "release_checks.py paper" in workflow
+    assert "release_checks.py source-date-epoch" in workflow
     assert "cffconvert --validate" in workflow
     assert "release_checks.py artifacts" in workflow
     assert "release_fresh_install.py" in workflow
@@ -45,10 +47,13 @@ def test_publish_workflow_runs_complete_gates_before_upload() -> None:
     workflow = (ROOT / ".github" / "workflows" / "publish.yml").read_text(
         encoding="utf-8"
     )
+    assert 'SOURCE_DATE_EPOCH: "1784077269"' in workflow
+    assert "test_phase_six_explicit_edges.py" in workflow
     publish_index = workflow.index("pypa/gh-action-pypi-publish")
     required = [
         '.[dev,mcp]',
         "release_checks.py version",
+        "release_checks.py source-date-epoch",
         "release_checks.py paper",
         "cffconvert --validate",
         "python -m compileall",
@@ -69,25 +74,27 @@ def test_artifact_member_privacy_rules_reject_runtime_and_private_inputs() -> No
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    assert module._check_member_name("memdsl-0.8.0/examples/alex/self.mem") == []
+    prefix = f"memdsl-{EXPECTED_VERSION}"
+    assert module._check_member_name(f"{prefix}/examples/alex/self.mem") == []
     assert module._check_member_name(
-        "memdsl-0.8.0/tests/fixtures/phase_minus_one/baseline.mem"
+        f"{prefix}/tests/fixtures/phase_minus_one/baseline.mem"
     ) == []
     synthetic_entries = [
-        (f"memdsl-0.8.0/{suffix}", b"")
+        (f"{prefix}/{suffix}", b"")
         for suffix in module.REQUIRED_PAPER_MEMBER_SUFFIXES
     ]
     assert module._missing_paper_members(synthetic_entries) == []
     assert module._missing_paper_members(synthetic_entries[:-1])
     for forbidden in (
-        "memdsl-0.8.0/approved.mem",
-        "memdsl-0.8.0/private/workspace.mem",
-        "memdsl-0.8.0/.memdsl/audit.log",
-        "memdsl-0.8.0/docs/launch_article_zh.md",
-        "memdsl-0.8.0/.env.production",
-        "memdsl-0.8.0/cache.sqlite3",
-        "memdsl-0.8.0/private-review.xlsx",
-        "memdsl-0.8.0/id_ed25519",
+        f"{prefix}/AGENTS.md",
+        f"{prefix}/approved.mem",
+        f"{prefix}/private/workspace.mem",
+        f"{prefix}/.memdsl/audit.log",
+        f"{prefix}/docs/launch_article_zh.md",
+        f"{prefix}/.env.production",
+        f"{prefix}/cache.sqlite3",
+        f"{prefix}/private-review.xlsx",
+        f"{prefix}/id_ed25519",
     ):
         assert module._check_member_name(forbidden), forbidden
 
