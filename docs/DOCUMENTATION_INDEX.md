@@ -1,23 +1,20 @@
 # memdsl Documentation Index
 
-This index keeps the practical software contract and the focused research
-paper adjacent without treating either as a substitute for the other.
+This index lists the public software contracts, implementation designs,
+release boundaries, and reproducibility material shipped with memdsl.
 
-## Version and evidence boundary
+## Version and release boundary
 
 | Item | Status | Authority |
 | --- | --- | --- |
 | memdsl `0.6.0` | Historical shipped baseline | tag `v0.6.0`, commit `72274d9d4f065b76bceaf30f529dcbd47b3f3e18` |
 | memdsl `0.8.0` | Frozen stable/public compatibility contract; not separately released | v1/v2 Source, review, compiled-view, navigation, query, and enforcement contracts |
 | memdsl `0.9.0` | Shipped software release | stable 0.8 contracts plus the opt-in workspace-v3 explicit Edge experiment; tag `v0.9.0` |
-| paper `v0.6` | Unpublished focused position-paper draft | P5 paper commit `5c55948b13029d82974cc12ee3249099b0444f75` |
-| paper authority runtime | Planned and unimplemented | the paper contract, not current memdsl behavior |
 
-`CITATION.cff` preserves the same split: its top-level record cites shipped
-software `0.9.0`, while `preferred-citation` cites the unpublished paper
-version `0.6`. The stable 0.8 compatibility line was not separately released.
+`CITATION.cff` cites the shipped memdsl software. The stable 0.8 compatibility
+line was not released separately.
 
-## Practical software contract
+## Software contracts and design
 
 - [Language and runtime specification](SPEC.md)
 - [Python, CLI, and MCP public API](PUBLIC_API.md)
@@ -31,23 +28,7 @@ version `0.6`. The stable 0.8 compatibility line was not separately released.
 The practical design describes the frozen Phase -1 through Phase 5 line plus
 the explicitly opt-in experimental Phase 6 Edge contract. The release-scope
 record classifies stable/public, experimental, planned, and host-excluded
-surfaces. None of these documents claim implementation of the paper's
-authority ledger, digest-bound grants, proof objects, live reduction closure,
-or `Verify` sinks.
-
-## Focused position-paper artifact
-
-- [Main manuscript](PAPER_review_gated_authority_source_compiled_contract.md)
-- [Related-work claim ledger](PAPER_related_work_claim_ledger.md)
-- [Reproducibility and release metadata](PAPER_reproducibility_and_release_metadata.md)
-- [P5 publication-readiness audit](PAPER_publication_readiness_audit.md)
-- [Paper license](PAPER_LICENSE.md)
-
-The manuscript is locally suitable for focused position-paper integration,
-but public or archival submission remains blocked until the author confirms
-the scholarly display name, funding statement, and competing-interest
-statement. DOI, ORCID, email, institution, venue, and archival status remain
-absent and must not be fabricated.
+surfaces.
 
 ## Reproducibility material
 
@@ -55,16 +36,13 @@ absent and must not be fabricated.
 - [Frozen baseline data](baselines/phase_minus_one_0.6.0.json)
 - [Synthetic benchmark harness](../benchmarks/phase_minus_one_baseline.py)
 
-These materials characterize synthetic fixtures. They are not empirical
-evidence for the paper's authority contract and are not a production SLO.
+These materials characterize deterministic synthetic fixtures. They are not a
+production SLO or a representative performance claim.
 
-## Local P6 receipt
+## Release records
 
-`PAPER_final_integration_audit.md` is the source-repository receipt for the
-historical paper integration and the current local release verification,
-artifact hashes, member counts, remaining blockers, and remote actions. It is
-intentionally excluded from built archives because recording an archive's own
-SHA-256 inside that archive would create a self-referential artifact identity.
-The archives instead carry this index, both companion documents, the Phase 6
-release-scope freeze, the readiness record, citation and license files, and the
-frozen reproducibility material.
+- [memdsl 0.9.0 published release receipt](releases/0.9.0.md)
+
+Release receipts record remote artifact identity and verification boundaries.
+They remain source-repository records and are excluded from wheel and sdist
+archives to avoid self-referential artifact identities.

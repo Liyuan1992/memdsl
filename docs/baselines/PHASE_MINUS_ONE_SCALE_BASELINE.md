@@ -9,9 +9,22 @@ Raw results: [phase_minus_one_0.6.0.json](phase_minus_one_0.6.0.json)
 
 ## Reproduction
 
-From the repository root with the development environment installed:
+Run the benchmark from the exact characterization commit
+`cf8c2bc0f1d338de0154c9c5129ad92c68279025`. That commit adds the benchmark
+and fixtures on top of the unmodified 0.6.0 runtime commit
+`72274d9d4f065b76bceaf30f529dcbd47b3f3e18`; `src/memdsl` has no differences
+between the two commits. The copy shipped on the current software line also
+freezes a canonical-LF runtime-source digest and refuses to label a newer or
+modified runtime as the historical baseline. The original characterization
+commit predates that guard, so its exact Git checkout remains the positive
+reproduction boundary.
+
+From a clean checkout of the characterization commit with its development
+environment installed:
 
 ```console
+git worktree add --detach <baseline-worktree> cf8c2bc0f1d338de0154c9c5129ad92c68279025
+cd <baseline-worktree>
 .venv\Scripts\python.exe benchmarks\phase_minus_one_baseline.py \
   --sizes 100 1000 10000 \
   --repeats 5 \

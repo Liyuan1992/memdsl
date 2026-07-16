@@ -53,11 +53,6 @@ packages = ["src/memdsl"]
 "docs/RELEASE_SCOPE_PHASE6.md" = "share/doc/memdsl/RELEASE_SCOPE_PHASE6.md"
 "docs/SPEC.md" = "share/doc/memdsl/SPEC.md"
 "docs/UPGRADING.md" = "share/doc/memdsl/UPGRADING.md"
-"docs/PAPER_LICENSE.md" = "share/doc/memdsl/PAPER_LICENSE.md"
-"docs/PAPER_publication_readiness_audit.md" = "share/doc/memdsl/PAPER_publication_readiness_audit.md"
-"docs/PAPER_related_work_claim_ledger.md" = "share/doc/memdsl/PAPER_related_work_claim_ledger.md"
-"docs/PAPER_reproducibility_and_release_metadata.md" = "share/doc/memdsl/PAPER_reproducibility_and_release_metadata.md"
-"docs/PAPER_review_gated_authority_source_compiled_contract.md" = "share/doc/memdsl/PAPER_review_gated_authority_source_compiled_contract.md"
 "docs/baselines/PHASE_MINUS_ONE_SCALE_BASELINE.md" = "share/doc/memdsl/baselines/PHASE_MINUS_ONE_SCALE_BASELINE.md"
 "docs/baselines/phase_minus_one_0.6.0.json" = "share/doc/memdsl/baselines/phase_minus_one_0.6.0.json"
 "benchmarks/phase_minus_one_baseline.py" = "share/doc/memdsl/benchmarks/phase_minus_one_baseline.py"
@@ -66,5 +61,5 @@ packages = ["src/memdsl"]
 exclude = [
     "/.cff-venv",
     "/AGENTS.md",
-    "/docs/PAPER_final_integration_audit.md",
+    "/docs/releases/0.9.0.md",
 ]

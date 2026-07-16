@@ -3,14 +3,14 @@
 Status: memdsl `0.9.0` software release scope. Tag `v0.9.0` anchors the package
 version without promoting the opt-in Edge surface beyond experimental.
 
-This record freezes the product boundary after the focused paper integration,
+This record freezes the product boundary after the stable 0.8 integration,
 the experimental explicit-Edge implementation, and the anonymous human-review
 follow-up. It does not make host-specific extraction or sanitization behavior
 part of memdsl.
 
 ## Ancestry and evidence anchors
 
-- Paper/candidate baseline: `4ee810833ef0cbd8562e72e3ad202a07c5ce77e8`.
+- Stable 0.8 integration baseline: `4ee810833ef0cbd8562e72e3ad202a07c5ce77e8`.
 - Experimental explicit-Edge implementation:
   `6bc3ffd986b1ffe29cefa928642fd0cf47e5c2c9`.
 - Anonymous human-review reconciliation:
@@ -84,7 +84,7 @@ memdsl core does not ship such a generator.
   `supersedes` did not receive direct human validation in this batch.
 - The observations do not validate automatic extraction, automatic Edge
   generation, complete private-memory understanding, production queue
-  economics, or the paper's planned authority runtime.
+  economics, or a non-bypassable authorization runtime.
 
 ## Exact-commit build contract
 
@@ -120,6 +120,5 @@ build, and outside-repository fresh-wheel gates pass. Host-specific sanitizer
 or extraction activation remains excluded from that decision.
 
 The `v0.9.0` software release may publish the verified package without changing
-the classifications above. Paper submission, Zenodo, DOI, host deployment,
-private-data activation, and any authority-semantic expansion remain separate,
-explicitly authorized actions.
+the classifications above. Host deployment, private-data activation, and any
+authority-semantic expansion remain separate, explicitly authorized actions.

@@ -18,7 +18,7 @@ import sys
 import time
 import tracemalloc
 from pathlib import Path
-from typing import Callable, List, Optional, Sequence, Tuple
+from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,7 +33,51 @@ from memdsl.parser import parse_text  # noqa: E402
 
 
 BASELINE_SOURCE_COMMIT = "72274d9d4f065b76bceaf30f529dcbd47b3f3e18"
+BASELINE_CHARACTERIZATION_COMMIT = "cf8c2bc0f1d338de0154c9c5129ad92c68279025"
+EXPECTED_MEMDSL_VERSION = "0.6.0"
+EXPECTED_RUNTIME_SOURCE_SHA256 = (
+    "7bbbe6f17084128b5106472d5c4d8a194768d1db4d6280ca91371cc47807ca8c"
+)
 SCHEMA_VERSION = "memdsl.synthetic_scale_baseline.v1"
+
+
+def canonical_source_digest(files: Iterable[Tuple[str, bytes]]) -> str:
+    """Hash stable source names and bytes after normalizing CRLF to LF."""
+    digest = hashlib.sha256()
+    for relative, payload in sorted(files):
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(payload.replace(b"\r\n", b"\n"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def runtime_source_digest(src_root: Path = SRC) -> str:
+    """Hash the runtime source with platform-independent LF semantics."""
+    files = (
+        (path.relative_to(src_root).as_posix(), path.read_bytes())
+        for path in (src_root / "memdsl").glob("*.py")
+    )
+    return canonical_source_digest(files)
+
+
+def validate_runtime_identity(version: str, source_digest: str) -> None:
+    """Reject measurements made with a runtime other than the frozen anchor."""
+    if (
+        version != EXPECTED_MEMDSL_VERSION
+        or source_digest != EXPECTED_RUNTIME_SOURCE_SHA256
+    ):
+        raise RuntimeError(
+            "phase-minus-one baseline requires the runtime source anchored at "
+            f"{BASELINE_SOURCE_COMMIT}; use characterization commit "
+            f"{BASELINE_CHARACTERIZATION_COMMIT}; loaded version={version} "
+            f"source_sha256={source_digest}"
+        )
+
+
+def require_baseline_runtime() -> None:
+    """Validate the loaded version and exact runtime source bytes."""
+    validate_runtime_identity(__version__, runtime_source_digest())
 
 
 def synthetic_source(declarations: int) -> str:
@@ -151,6 +195,7 @@ def measure_size(declarations: int, repeats: int) -> dict:
 
 
 def run(sizes: Sequence[int], repeats: int) -> dict:
+    require_baseline_runtime()
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),

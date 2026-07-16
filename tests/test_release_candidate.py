@@ -3,8 +3,10 @@
 from pathlib import Path
 import importlib.util
 import re
+import subprocess
 
 import memdsl
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +41,7 @@ def test_release_source_bytes_and_build_backend_are_canonical() -> None:
     assert pyproject.count(f'"{py39}"') == 2
     assert pyproject.count(f'"{release}"') == 2
     assert '"/.cff-venv"' in pyproject
+    assert '"/docs/releases/0.9.0.md"' in pyproject
 
 
 def test_ci_covers_core_mcp_security_and_artifact_release_gates() -> None:
@@ -50,12 +53,13 @@ def test_ci_covers_core_mcp_security_and_artifact_release_gates() -> None:
     for version in ("3.9", "3.10", "3.11", "3.12"):
         assert f'"{version}"' in workflow
     assert 'python-version: ["3.10", "3.12"]' in workflow
+    assert workflow.count("fetch-depth: 0") == 3
     assert '.[dev,mcp]' in workflow
     assert "test_phase_three_indexed_query_trace.py" in workflow
     assert "test_phase_four_use_dialect.py" in workflow
     assert "test_phase_five_quarantine_enforcement.py" in workflow
     assert "test_phase_six_explicit_edges.py" in workflow
-    assert "release_checks.py paper" in workflow
+    assert "release_checks.py release-docs" in workflow
     assert "release_checks.py source-date-epoch" in workflow
     assert "release_checks.py source-tree" in workflow
     assert "release_checks.py build-toolchain" in workflow
@@ -73,6 +77,7 @@ def test_publish_workflow_runs_complete_gates_before_upload() -> None:
         encoding="utf-8"
     )
     assert 'SOURCE_DATE_EPOCH: "1784077269"' in workflow
+    assert "fetch-depth: 0" in workflow
     assert "test_phase_six_explicit_edges.py" in workflow
     publish_index = workflow.index("pypa/gh-action-pypi-publish")
     required = [
@@ -81,7 +86,7 @@ def test_publish_workflow_runs_complete_gates_before_upload() -> None:
         "release_checks.py source-date-epoch",
         "release_checks.py source-tree",
         "release_checks.py build-toolchain",
-        "release_checks.py paper",
+        "release_checks.py release-docs",
         "RUNNER_TEMP",
         "cffconvert",
         "--validate",
@@ -112,10 +117,10 @@ def test_artifact_member_privacy_rules_reject_runtime_and_private_inputs() -> No
     ) == []
     synthetic_entries = [
         (f"{prefix}/{suffix}", b"")
-        for suffix in module.REQUIRED_PAPER_MEMBER_SUFFIXES
+        for suffix in module.REQUIRED_RELEASE_DOC_MEMBER_SUFFIXES
     ]
-    assert module._missing_paper_members(synthetic_entries) == []
-    assert module._missing_paper_members(synthetic_entries[:-1])
+    assert module._missing_release_doc_members(synthetic_entries) == []
+    assert module._missing_release_doc_members(synthetic_entries[:-1])
     for forbidden in (
         f"{prefix}/AGENTS.md",
         f"{prefix}/approved.mem",
@@ -130,10 +135,82 @@ def test_artifact_member_privacy_rules_reject_runtime_and_private_inputs() -> No
         assert module._check_member_name(forbidden), forbidden
 
 
-def test_paper_metadata_and_frozen_evidence_contract() -> None:
+def test_release_documentation_and_frozen_evidence_contract() -> None:
     script = ROOT / "scripts" / "release_checks.py"
-    spec = importlib.util.spec_from_file_location("release_checks_paper", script)
+    spec = importlib.util.spec_from_file_location("release_checks_docs", script)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    module.check_paper(ROOT)
+    module.check_release_docs(ROOT)
+
+
+def test_historical_baseline_rejects_a_newer_runtime() -> None:
+    script = ROOT / "benchmarks" / "phase_minus_one_baseline.py"
+    spec = importlib.util.spec_from_file_location("phase_minus_one_baseline", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module.__version__ == EXPECTED_VERSION
+    lf_digest = module.canonical_source_digest(
+        [("memdsl/example.py", b"value = 1\n")]
+    )
+    crlf_digest = module.canonical_source_digest(
+        [("memdsl/example.py", b"value = 1\r\n")]
+    )
+    assert lf_digest == crlf_digest
+
+    if not (ROOT / ".git").exists():
+        pytest.skip("Git history is required to verify the historical source anchor")
+
+    runtime_diff = subprocess.run(
+        [
+            "git",
+            "diff",
+            "--quiet",
+            module.BASELINE_SOURCE_COMMIT,
+            module.BASELINE_CHARACTERIZATION_COMMIT,
+            "--",
+            "src/memdsl",
+        ],
+        cwd=ROOT,
+        check=False,
+    )
+    assert runtime_diff.returncode == 0
+
+    names = subprocess.check_output(
+        [
+            "git",
+            "ls-tree",
+            "-r",
+            "--name-only",
+            module.BASELINE_CHARACTERIZATION_COMMIT,
+            "--",
+            "src/memdsl",
+        ],
+        cwd=ROOT,
+        text=True,
+    ).splitlines()
+    source_files = [
+        (
+            Path(name).relative_to("src").as_posix(),
+            subprocess.check_output(
+                [
+                    "git",
+                    "show",
+                    f"{module.BASELINE_CHARACTERIZATION_COMMIT}:{name}",
+                ],
+                cwd=ROOT,
+            ),
+        )
+        for name in names
+        if name.endswith(".py")
+    ]
+    anchored_digest = module.canonical_source_digest(source_files)
+    assert anchored_digest == module.EXPECTED_RUNTIME_SOURCE_SHA256
+    module.validate_runtime_identity(
+        module.EXPECTED_MEMDSL_VERSION,
+        anchored_digest,
+    )
+    with pytest.raises(RuntimeError, match="requires the runtime source anchored"):
+        module.require_baseline_runtime()
