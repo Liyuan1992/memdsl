@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Simplified the public repository and distribution membership to software
+  contracts, release documentation, and synthetic benchmarks.
+- Replaced research-only build gates with software CFF, release-document,
+  Markdown-link, privacy, baseline, and artifact-membership checks.
+- Added a software-only 0.9.0 release receipt using the published GitHub/PyPI
+  hashes and made the historical 0.6.0 benchmark reject newer runtimes.
+
 ## 0.9.0 - 2026-07-16
 
 - Experimental Phase 6 first-class explicit Edge source/model contract with
@@ -65,11 +74,6 @@
 - Hardened tag publishing to install the MCP extra, run full tests and
   compile/AST gates, inspect and privacy-scan wheel/sdist members, and perform
   an outside-repository fresh-wheel CLI plus real MCP stdio smoke before upload.
-- Integrated the separately verified focused paper v0.6 artifact alongside the
-  practical 0.8.0 specification without treating the paper authority runtime
-  as implemented. Added an explicit documentation index, software/paper
-  citation and license split, P5 publication-readiness record, and required
-  paper/reproducibility members in both wheel and sdist release checks.
 
 ## 0.6.0 - 2026-07-14
 

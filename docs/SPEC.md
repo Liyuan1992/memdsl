@@ -1001,7 +1001,7 @@ decision: independently reviewable Edges can be useful, but automatic
 candidate coverage, relation selection, and evidence stability are not shown
 to be ready. The batch does not validate automatic extraction, automatic Edge
 generation, production review economics, complete private-memory
-understanding, or the paper authority runtime.
+understanding, or a non-bypassable authorization runtime.
 
 Host-specific extraction and sanitization acceptance is outside this
 specification. A host may refuse to activate its own shadow pipeline without
@@ -1041,6 +1041,6 @@ Authority limitation: Source remains the runtime authority. Review/audit state
 does not participate in `CompiledWorkspace`, `ResolvedView`, graph authority,
 or access authorization, and direct active Source writes can bypass proposal
 review. Phase 6 is only a **Source-authority + review-gated workflow contract**,
-not a digest-bound grant, authority ledger, proof object, or non-bypassable
-reviewed authorization guarantee. The normative risks and rollback rules are
-in [DESIGN_explicit_edges_phase6.md](DESIGN_explicit_edges_phase6.md).
+not a non-bypassable reviewed authorization guarantee. The normative risks
+and rollback rules are in
+[DESIGN_explicit_edges_phase6.md](DESIGN_explicit_edges_phase6.md).

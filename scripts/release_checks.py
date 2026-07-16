@@ -69,19 +69,13 @@ FORBIDDEN_SUFFIXES = {
 RELEASE_SOURCE_DATE_EPOCH = 1784077269
 RELEASE_HATCHLING_VERSION = "1.31.0"
 PY39_HATCHLING_VERSION = "1.27.0"
-EXPECTED_PAPER_WORDS = 5256
 
-REQUIRED_PAPER_MEMBER_SUFFIXES = {
+REQUIRED_RELEASE_DOC_MEMBER_SUFFIXES = {
     "CITATION.cff",
     "LICENSE",
     "DOCUMENTATION_INDEX.md",
     "DESIGN_memory_source_compiled_view.md",
     "DESIGN_explicit_edges_phase6.md",
-    "PAPER_LICENSE.md",
-    "PAPER_publication_readiness_audit.md",
-    "PAPER_related_work_claim_ledger.md",
-    "PAPER_reproducibility_and_release_metadata.md",
-    "PAPER_review_gated_authority_source_compiled_contract.md",
     "PUBLIC_API.md",
     "RELEASE_SCOPE_PHASE6.md",
     "SPEC.md",
@@ -91,32 +85,20 @@ REQUIRED_PAPER_MEMBER_SUFFIXES = {
     "benchmarks/phase_minus_one_baseline.py",
 }
 
-PAPER_FROZEN_BLOB_HASHES = {
-    "CITATION.cff": "a6b101b322f7bc378d70bc4c55d56a6db98186298d5890b6c306e4226a53d182",
-    "docs/PAPER_publication_readiness_audit.md": "592b58f05d8c69c4ec5356b47a36b4eaa0a3838185319f04cea592af3b104a55",
-    "docs/PAPER_related_work_claim_ledger.md": "0704562e6a7631e78ec369970e65f591563c42289b8746eb96c9dd1ee134190c",
-    "docs/PAPER_reproducibility_and_release_metadata.md": "3659450dff2671251cdc4a66416903625d661762f659f11b4cf5a8e0fdc2de31",
-    "docs/PAPER_review_gated_authority_source_compiled_contract.md": "63cf881b1a13f58e5f7d81cd40a062b99e11fa78c79dc732a5448480fabb5d7f",
-}
-
 FROZEN_BASELINE_HASHES = {
     "docs/baselines/phase_minus_one_0.6.0.json": "fad66899ce0e795efdbd0d3691d24d4b85414f4627c75d06abe826e165dbeca8",
-    "docs/baselines/PHASE_MINUS_ONE_SCALE_BASELINE.md": "acb80fb9413f58944597b9f71b4f8e5ff71dd4a94ca91479c12982cb226c855d",
-    "benchmarks/phase_minus_one_baseline.py": "6d37c9f3eb55e35e8a8a7e40d6cd20bc59654b6d3f2d7d822c2b9d2a1b25b574",
+    "docs/baselines/PHASE_MINUS_ONE_SCALE_BASELINE.md": "3543535b867cd80285c37eb1dda3556e13d11b1c53bb5b0163573483a23cddb1",
+    "benchmarks/phase_minus_one_baseline.py": "6e6b585bf7a6a46a8215fb31de2eae2d10b30211f0e25935839608e42ad0d97a",
 }
 
-PAPER_MARKDOWN_FILES = {
+RELEASE_MARKDOWN_FILES = {
     "README.md",
     "docs/DOCUMENTATION_INDEX.md",
     "docs/DESIGN_memory_source_compiled_view.md",
     "docs/DESIGN_explicit_edges_phase6.md",
-    "docs/PAPER_LICENSE.md",
-    "docs/PAPER_publication_readiness_audit.md",
-    "docs/PAPER_related_work_claim_ledger.md",
-    "docs/PAPER_reproducibility_and_release_metadata.md",
-    "docs/PAPER_review_gated_authority_source_compiled_contract.md",
     "docs/PUBLIC_API.md",
     "docs/RELEASE_SCOPE_PHASE6.md",
+    "docs/releases/0.9.0.md",
     "docs/SPEC.md",
     "docs/UPGRADING.md",
 }
@@ -297,11 +279,6 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _sha256_normalized_text(path: Path) -> str:
-    payload = path.read_bytes().replace(b"\r\n", b"\n")
-    return hashlib.sha256(payload).hexdigest()
-
-
 def _check_markdown_links(repo_root: Path, paths: Iterable[str]) -> List[str]:
     failures: List[str] = []
     link_pattern = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
@@ -327,67 +304,26 @@ def _check_markdown_links(repo_root: Path, paths: Iterable[str]) -> List[str]:
     return failures
 
 
-def check_paper(repo_root: Path) -> None:
+def check_release_docs(repo_root: Path) -> None:
     failures: List[str] = []
     required_paths = (
-        set(PAPER_FROZEN_BLOB_HASHES)
-        | set(FROZEN_BASELINE_HASHES)
-        | PAPER_MARKDOWN_FILES
-        | {"LICENSE", "pyproject.toml"}
+        set(FROZEN_BASELINE_HASHES)
+        | RELEASE_MARKDOWN_FILES
+        | {"CITATION.cff", "LICENSE", "pyproject.toml"}
     )
     for relative in sorted(required_paths):
         if not (repo_root / relative).is_file():
-            failures.append(f"missing paper/release file: {relative}")
+            failures.append(f"missing release documentation file: {relative}")
 
     if failures:
-        raise AssertionError("paper checks failed:\n- " + "\n- ".join(failures))
+        raise AssertionError(
+            "release documentation checks failed:\n- " + "\n- ".join(failures)
+        )
 
-    for relative, expected in PAPER_FROZEN_BLOB_HASHES.items():
-        actual = _sha256_normalized_text(repo_root / relative)
-        if actual != expected:
-            failures.append(f"{relative}: sha256 {actual} != {expected}")
     for relative, expected in FROZEN_BASELINE_HASHES.items():
         actual = _sha256(repo_root / relative)
         if actual != expected:
             failures.append(f"{relative}: sha256 {actual} != {expected}")
-
-    manuscript = (
-        repo_root / "docs/PAPER_review_gated_authority_source_compiled_contract.md"
-    ).read_text(encoding="utf-8")
-    body, references = manuscript.split("## References", 1)
-    reference_numbers = set(re.findall(r"^\[(\d+)\] ", references, re.MULTILINE))
-    cited_numbers = {
-        number
-        for citation_group in re.findall(r"\[([0-9,\s]+)\]", body)
-        for number in re.findall(r"\d+", citation_group)
-    }
-    expected_references = {str(index) for index in range(1, 15)}
-    if reference_numbers != expected_references:
-        failures.append(
-            f"manuscript reference entries={sorted(reference_numbers)} expected=1..14"
-        )
-    if not expected_references <= cited_numbers:
-        failures.append(
-            "manuscript body missing citations: "
-            + ", ".join(sorted(expected_references - cited_numbers))
-        )
-    manuscript_words = len(re.findall(r"\S+", manuscript))
-    if manuscript_words != EXPECTED_PAPER_WORDS:
-        failures.append(
-            f"manuscript whitespace words={manuscript_words} "
-            f"expected={EXPECTED_PAPER_WORDS}"
-        )
-
-    ledger = (repo_root / "docs/PAPER_related_work_claim_ledger.md").read_text(
-        encoding="utf-8"
-    )
-    claim_ids = re.findall(
-        r"^\| ((?:A|I|RW|CB|C)-\d{2}) \|", ledger, re.MULTILINE
-    )
-    if len(claim_ids) != 24 or len(set(claim_ids)) != 24:
-        failures.append(
-            f"claim ledger rows={len(claim_ids)} unique={len(set(claim_ids))} expected=24"
-        )
 
     release_scope = (repo_root / "docs/RELEASE_SCOPE_PHASE6.md").read_text(
         encoding="utf-8"
@@ -406,6 +342,7 @@ def check_paper(repo_root: Path) -> None:
         "Hatchling `1.31.0`",
         "release_checks.py source-tree",
         "python -m build --no-isolation",
+        "Stable 0.8 integration baseline",
         "4ee810833ef0cbd8562e72e3ad202a07c5ce77e8",
         "6bc3ffd986b1ffe29cefa928642fd0cf47e5c2c9",
         "4ec9d43fda56a277609dd822c61acdb9a7265655",
@@ -415,53 +352,51 @@ def check_paper(repo_root: Path) -> None:
     citation = (repo_root / "CITATION.cff").read_text(encoding="utf-8")
     for required in (
         "cff-version: 1.2.0",
+        "type: software",
         'version: "0.9.0"',
         "date-released: 2026-07-16",
-        "preferred-citation:",
-        '  version: "0.6"',
-        "  license: CC-BY-4.0",
+        "license: MIT",
     ):
         if required not in citation:
             failures.append(f"CITATION.cff missing contract text: {required}")
+    if "preferred-citation:" in citation:
+        failures.append("CITATION.cff must cite the software only")
     if "\ncommit:" in citation:
         failures.append(
             "CITATION.cff must use the release version/tag rather than a self-referential commit"
         )
 
-    paper_license = (repo_root / "docs/PAPER_LICENSE.md").read_text(encoding="utf-8")
-    for name in (
-        "PAPER_review_gated_authority_source_compiled_contract.md",
-        "PAPER_related_work_claim_ledger.md",
-        "PAPER_reproducibility_and_release_metadata.md",
-        "PAPER_publication_readiness_audit.md",
-        "PAPER_final_integration_audit.md",
+    receipt = (repo_root / "docs/releases/0.9.0.md").read_text(encoding="utf-8")
+    for required in (
+        "47ae79fafc334d24ca8615d8ef77df6be52e1e8a",
+        "86e7bb81a83956dc775a4a5ede824b29a2e3b2093b6e92cf9eb40b9865d0b7e8",
+        "a92841ff80c1b33a613a7efc20dac8a5fbaf3caccf9c83e2500a321fd8908728",
+        "https://github.com/Liyuan1992/memdsl/releases/tag/v0.9.0",
+        "https://pypi.org/project/memdsl/0.9.0/",
     ):
-        if name not in paper_license:
-            failures.append(f"PAPER_LICENSE.md does not cover {name}")
+        if required not in receipt:
+            failures.append(f"0.9.0 release receipt missing: {required}")
 
     root_license = (repo_root / "LICENSE").read_text(encoding="utf-8")
-    if "final local integration audit" not in root_license:
-        failures.append("LICENSE does not preserve the software/paper license split")
+    if "specification document" not in root_license or "CC-BY-4.0" not in root_license:
+        failures.append("LICENSE does not preserve the SPEC license boundary")
 
     pyproject = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
-    for suffix in REQUIRED_PAPER_MEMBER_SUFFIXES:
+    for suffix in REQUIRED_RELEASE_DOC_MEMBER_SUFFIXES:
         basename = Path(suffix).name
         if basename not in pyproject:
             failures.append(f"pyproject.toml does not package {basename}")
     for excluded in (
         "/.cff-venv",
         "/AGENTS.md",
-        "/docs/PAPER_final_integration_audit.md",
+        "/docs/releases/0.9.0.md",
     ):
         if f'"{excluded}"' not in pyproject:
             failures.append(f"pyproject.toml does not exclude {excluded}")
 
-    failures.extend(_check_markdown_links(repo_root, PAPER_MARKDOWN_FILES))
+    failures.extend(_check_markdown_links(repo_root, RELEASE_MARKDOWN_FILES))
 
-    privacy_paths = set(PAPER_MARKDOWN_FILES) | {"CITATION.cff", "LICENSE"}
-    integration_audit = repo_root / "docs/PAPER_final_integration_audit.md"
-    if integration_audit.is_file():
-        privacy_paths.add("docs/PAPER_final_integration_audit.md")
+    privacy_paths = set(RELEASE_MARKDOWN_FILES) | {"CITATION.cff", "LICENSE"}
     patterns = _privacy_patterns(repo_root)
     for relative in sorted(privacy_paths):
         text = (repo_root / relative).read_text(encoding="utf-8")
@@ -470,14 +405,13 @@ def check_paper(repo_root: Path) -> None:
                 failures.append(f"{relative}: matched privacy pattern {label}")
 
     if failures:
-        raise AssertionError("paper checks failed:\n- " + "\n- ".join(failures))
-    print("paper_references=14")
-    print("paper_claim_rows=24")
-    print(f"paper_words={manuscript_words}")
-    print("paper_links=ok")
-    print("paper_license=ok")
-    print("paper_privacy=ok")
-    print("paper_frozen_hashes=ok")
+        raise AssertionError(
+            "release documentation checks failed:\n- " + "\n- ".join(failures)
+        )
+    print("release_docs_links=ok")
+    print("release_docs_citation=ok")
+    print("release_docs_privacy=ok")
+    print("frozen_baselines=ok")
 
 
 def _archive_entries(path: Path) -> List[Tuple[str, bytes]]:
@@ -562,11 +496,11 @@ def _check_member_name(name: str) -> List[str]:
     return failures
 
 
-def _missing_paper_members(entries: Iterable[Tuple[str, bytes]]) -> List[str]:
+def _missing_release_doc_members(entries: Iterable[Tuple[str, bytes]]) -> List[str]:
     relative_names = [_relative_member(name) for name, _ in entries]
     return sorted(
         suffix
-        for suffix in REQUIRED_PAPER_MEMBER_SUFFIXES
+        for suffix in REQUIRED_RELEASE_DOC_MEMBER_SUFFIXES
         if not any(name.endswith(suffix) for name in relative_names)
     )
 
@@ -591,11 +525,11 @@ def check_artifacts(repo_root: Path, dist_dir: Path, expected: str) -> None:
                 f"{artifact.name}: metadata version {metadata_version!r} != {expected!r}"
             )
 
-        missing_paper_members = _missing_paper_members(entries)
-        if missing_paper_members:
+        missing_release_doc_members = _missing_release_doc_members(entries)
+        if missing_release_doc_members:
             failures.append(
-                f"{artifact.name}: missing required paper members: "
-                + ", ".join(missing_paper_members)
+                f"{artifact.name}: missing required release documentation: "
+                + ", ".join(missing_release_doc_members)
             )
 
         print(f"artifact={artifact.name} members={len(entries)}")
@@ -634,7 +568,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("build-toolchain")
 
-    subparsers.add_parser("paper")
+    subparsers.add_parser("release-docs")
 
     artifacts = subparsers.add_parser("artifacts")
     artifacts.add_argument("--dist", type=Path, default=Path("dist"))
@@ -655,8 +589,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         check_source_tree(repo_root)
     elif args.command == "build-toolchain":
         check_build_toolchain(repo_root)
-    elif args.command == "paper":
-        check_paper(repo_root)
+    elif args.command == "release-docs":
+        check_release_docs(repo_root)
     elif args.command == "artifacts":
         dist_dir = args.dist
         if not dist_dir.is_absolute():
