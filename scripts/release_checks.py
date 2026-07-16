@@ -448,7 +448,11 @@ def check_paper(repo_root: Path) -> None:
         basename = Path(suffix).name
         if basename not in pyproject:
             failures.append(f"pyproject.toml does not package {basename}")
-    for excluded in ("/AGENTS.md", "/docs/PAPER_final_integration_audit.md"):
+    for excluded in (
+        "/.cff-venv",
+        "/AGENTS.md",
+        "/docs/PAPER_final_integration_audit.md",
+    ):
         if f'"{excluded}"' not in pyproject:
             failures.append(f"pyproject.toml does not exclude {excluded}")
 

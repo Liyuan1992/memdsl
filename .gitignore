@@ -4,5 +4,6 @@ __pycache__/
 dist/
 build/
 .venv/
+.cff-venv/
 .pytest_cache/
 .memdsl/

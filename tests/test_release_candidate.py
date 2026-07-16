@@ -30,11 +30,15 @@ def test_release_source_bytes_and_build_backend_are_canonical() -> None:
     assert "*.bat text eol=crlf" in attributes
     assert "*.cmd text eol=crlf" in attributes
 
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert ".cff-venv/" in gitignore
+
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     py39 = f"hatchling=={PY39_HATCHLING}; python_version < '3.10'"
     release = f"hatchling=={EXPECTED_HATCHLING}; python_version >= '3.10'"
     assert pyproject.count(f'"{py39}"') == 2
     assert pyproject.count(f'"{release}"') == 2
+    assert '"/.cff-venv"' in pyproject
 
 
 def test_ci_covers_core_mcp_security_and_artifact_release_gates() -> None:
@@ -56,7 +60,10 @@ def test_ci_covers_core_mcp_security_and_artifact_release_gates() -> None:
     assert "release_checks.py source-tree" in workflow
     assert "release_checks.py build-toolchain" in workflow
     assert "python -m build --no-isolation" in workflow
-    assert "cffconvert --validate" in workflow
+    assert "RUNNER_TEMP" in workflow
+    assert "cffconvert" in workflow
+    assert "--validate" in workflow
+    assert "python -m venv .cff-venv" not in workflow
     assert "release_checks.py artifacts" in workflow
     assert "release_fresh_install.py" in workflow
 
@@ -75,7 +82,9 @@ def test_publish_workflow_runs_complete_gates_before_upload() -> None:
         "release_checks.py source-tree",
         "release_checks.py build-toolchain",
         "release_checks.py paper",
-        "cffconvert --validate",
+        "RUNNER_TEMP",
+        "cffconvert",
+        "--validate",
         "python -m compileall",
         "python -m pytest -q",
         "python -m build --no-isolation",
@@ -86,6 +95,7 @@ def test_publish_workflow_runs_complete_gates_before_upload() -> None:
     for command in required:
         assert command in workflow
         assert workflow.index(command) < publish_index
+    assert "python -m venv .cff-venv" not in workflow
 
 
 def test_artifact_member_privacy_rules_reject_runtime_and_private_inputs() -> None:

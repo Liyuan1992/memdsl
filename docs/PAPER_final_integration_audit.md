@@ -91,7 +91,7 @@ result does not create a self-referential artifact hash.
 | Archive | Bytes | Members | SHA-256 |
 | --- | ---: | ---: | --- |
 | `memdsl-0.9.0-py3-none-any.whl` | 331,075 | 44 | `0e79d4bdf55f4c887eb08227ecc5ed4680d0000107ecf49504184373d6791003` |
-| `memdsl-0.9.0.tar.gz` | 429,044 | 108 | `c5d54f142dca6d1cf543f6713cc9b531c4796ea8d26d225ad1ec30fad3ba15d9` |
+| `memdsl-0.9.0.tar.gz` | 429,167 | 108 | `a92841ff80c1b33a613a7efc20dac8a5fbaf3caccf9c83e2500a321fd8908728` |
 
 Both archives must include the documentation index, practical design, explicit
 Edge design, release-scope freeze, SPEC, PUBLIC_API, UPGRADING, focused paper,

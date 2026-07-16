@@ -63,4 +63,8 @@ packages = ["src/memdsl"]
 "benchmarks/phase_minus_one_baseline.py" = "share/doc/memdsl/benchmarks/phase_minus_one_baseline.py"
 
 [tool.hatch.build.targets.sdist]
-exclude = ["/AGENTS.md", "/docs/PAPER_final_integration_audit.md"]
+exclude = [
+    "/.cff-venv",
+    "/AGENTS.md",
+    "/docs/PAPER_final_integration_audit.md",
+]

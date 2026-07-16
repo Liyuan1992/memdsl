@@ -28,9 +28,10 @@ jobs:
 
       - name: Validate CFF schema in an isolated environment
         run: |
-          python -m venv .cff-venv
-          .cff-venv/bin/python -m pip install cffconvert==2.0.0
-          .cff-venv/bin/cffconvert --validate
+          CFF_VENV="${RUNNER_TEMP}/memdsl-cff-venv"
+          python -m venv "$CFF_VENV"
+          "$CFF_VENV/bin/python" -m pip install cffconvert==2.0.0
+          "$CFF_VENV/bin/cffconvert" --validate
 
       - name: Verify tag and runtime versions agree
         run: |
